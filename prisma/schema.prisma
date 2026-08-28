@@ -20,6 +20,16 @@ enum DeliveryStatus {
   FAILED_PERMANENT
 }
 
+model Client {
+  id             String         @id @default(uuid()) @db.Uuid
+  apiKeyHash     String         @unique @map("api_key_hash") @db.Char(64)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  subscriptions  Subscription[]
+  events         Event[]
+
+  @@map("clients")
+}
+
 model Subscription {
   id               String             @id @default(uuid()) @db.Uuid
   clientId         String             @map("client_id") @db.Uuid
@@ -29,6 +39,7 @@ model Subscription {
   status           SubscriptionStatus @default(ACTIVE)
   createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  client           Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
   deliveryAttempts DeliveryAttempt[]
 
   @@index([clientId, status], map: "subscriptions_client_id_status_idx")
@@ -43,6 +54,7 @@ model Event {
   payload          Json              @db.JsonB
   source           String?           @db.VarChar(255)
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  client           Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
   deliveryAttempts DeliveryAttempt[]
 
   @@index([clientId, type], map: "events_client_id_type_idx")
