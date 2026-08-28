@@ -4,7 +4,7 @@ import { env } from './config/env';
 const app = createApp();
 
 const server = app.listen(env.PORT, env.HOST, () => {
-  console.info(`Webhook Dispatcher listening on http://${env.HOST}:${env.PORT}`);
+  console.info(`Pigeon listening on http://${env.HOST}:${env.PORT}`);
 });
 
 server.on('error', (error) => {

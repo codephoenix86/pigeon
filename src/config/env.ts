@@ -10,7 +10,7 @@ const environmentSchema = z.object({
   DATABASE_URL: z
     .string()
     .url()
-    .default('postgresql://postgres:postgres@localhost:5432/webhook_dispatcher?schema=public'),
+    .default('postgresql://postgres@localhost:5432/pigeon?schema=public'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
 });
 
