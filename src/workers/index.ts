@@ -12,11 +12,21 @@ import {
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
 
 const activeDeliveriesBySubscription = new Map<string, number>();
+const retryDelayByJobId = new Map<string, number>();
+
+class WebhookResponseError extends Error {
+  constructor(readonly httpStatus: number) {
+    super(`Webhook endpoint responded with HTTP ${httpStatus}.`);
+    this.name = 'WebhookResponseError';
+  }
+}
 
 const loadDelivery = (deliveryAttemptId: string) =>
   prisma.deliveryAttempt.findUnique({
     where: { id: deliveryAttemptId },
     select: {
+      eventId: true,
+      subscriptionId: true,
       event: { select: { payload: true } },
       subscription: {
         select: {
@@ -49,7 +59,32 @@ const releaseSubscription = (subscriptionId: string) => {
   }
 };
 
-const postDelivery = async (delivery: NonNullable<Awaited<ReturnType<typeof loadDelivery>>>) => {
+type LoadedDelivery = NonNullable<Awaited<ReturnType<typeof loadDelivery>>>;
+
+const startDeliveryAttempt = (delivery: LoadedDelivery, attemptNumber: number) =>
+  prisma.deliveryAttempt.upsert({
+    where: {
+      eventId_subscriptionId_attemptNumber: {
+        eventId: delivery.eventId,
+        subscriptionId: delivery.subscriptionId,
+        attemptNumber,
+      },
+    },
+    create: {
+      eventId: delivery.eventId,
+      subscriptionId: delivery.subscriptionId,
+      status: DeliveryStatus.IN_PROGRESS,
+      attemptNumber,
+    },
+    update: {
+      status: DeliveryStatus.IN_PROGRESS,
+      httpStatus: null,
+      nextRetryAt: null,
+    },
+    select: { id: true },
+  });
+
+const postDelivery = async (delivery: LoadedDelivery) => {
   const response = await fetch(delivery.subscription.targetUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -61,8 +96,10 @@ const postDelivery = async (delivery: NonNullable<Awaited<ReturnType<typeof load
   await response.body?.cancel();
 
   if (!response.ok) {
-    throw new Error(`Webhook endpoint responded with HTTP ${response.status}.`);
+    throw new WebhookResponseError(response.status);
   }
+
+  return response.status;
 };
 
 const hasExhaustedAttempts = (job: Job<DeliveryJobData>): boolean =>
@@ -72,6 +109,7 @@ const deadLetterDelivery = async (
   deliveryAttemptId: string,
   attemptsMade: number,
   error: unknown,
+  httpStatus: number | null,
 ) => {
   const failedReason = error instanceof Error ? error.message : 'Unknown delivery error.';
   const update = await prisma.deliveryAttempt.updateMany({
@@ -81,6 +119,7 @@ const deadLetterDelivery = async (
     },
     data: {
       status: DeliveryStatus.FAILED_PERMANENT,
+      httpStatus,
       nextRetryAt: null,
     },
   });
@@ -98,6 +137,10 @@ const deadLetterDelivery = async (
 };
 
 const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
+  let acquiredSubscriptionId: string | undefined;
+  let currentAttemptId: string | undefined;
+  let httpStatus: number | null = null;
+
   try {
     const delivery = await loadDelivery(job.data.deliveryAttemptId);
 
@@ -113,22 +156,72 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
       throw new DelayedError();
     }
 
-    try {
-      await postDelivery(delivery);
-    } finally {
-      releaseSubscription(subscriptionId);
-    }
+    acquiredSubscriptionId = subscriptionId;
+    const attemptNumber = job.attemptsMade + 1;
+    const attempt = await startDeliveryAttempt(delivery, attemptNumber);
+    currentAttemptId = attempt.id;
+    httpStatus = await postDelivery(delivery);
+
+    await prisma.deliveryAttempt.update({
+      where: { id: currentAttemptId },
+      data: {
+        status: DeliveryStatus.DELIVERED,
+        httpStatus,
+        nextRetryAt: null,
+      },
+    });
   } catch (error) {
     if (error instanceof DelayedError) {
       throw error;
     }
 
+    if (error instanceof WebhookResponseError) {
+      httpStatus = error.httpStatus;
+    }
+
     if (hasExhaustedAttempts(job)) {
-      await deadLetterDelivery(job.data.deliveryAttemptId, job.attemptsMade + 1, error);
+      await deadLetterDelivery(
+        currentAttemptId ?? job.data.deliveryAttemptId,
+        job.attemptsMade + 1,
+        error,
+        httpStatus,
+      );
+    } else if (currentAttemptId) {
+      const retryDelay = calculateDeliveryBackoff(job.attemptsMade + 1);
+
+      if (job.id) {
+        retryDelayByJobId.set(job.id, retryDelay);
+      }
+
+      await prisma.deliveryAttempt.update({
+        where: { id: currentAttemptId },
+        data: {
+          status: DeliveryStatus.RETRY_SCHEDULED,
+          httpStatus,
+          nextRetryAt: new Date(Date.now() + retryDelay),
+        },
+      });
     }
 
     throw error;
+  } finally {
+    if (acquiredSubscriptionId) {
+      releaseSubscription(acquiredSubscriptionId);
+    }
   }
+};
+
+const deliveryBackoffStrategy = (attemptsMade: number, job?: { id?: string }): number => {
+  if (job?.id) {
+    const recordedDelay = retryDelayByJobId.get(job.id);
+
+    if (recordedDelay !== undefined) {
+      retryDelayByJobId.delete(job.id);
+      return recordedDelay;
+    }
+  }
+
+  return calculateDeliveryBackoff(attemptsMade);
 };
 
 export const deliveryWorker = new Worker<DeliveryJobData, void, typeof DELIVERY_JOB_NAME>(
@@ -142,7 +235,8 @@ export const deliveryWorker = new Worker<DeliveryJobData, void, typeof DELIVERY_
       maxRetriesPerRequest: null,
     },
     settings: {
-      backoffStrategy: (attemptsMade) => calculateDeliveryBackoff(attemptsMade),
+      backoffStrategy: (attemptsMade, _type, _error, job) =>
+        deliveryBackoffStrategy(attemptsMade, job),
     },
   },
 );
