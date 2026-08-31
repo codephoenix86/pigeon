@@ -1,6 +1,7 @@
 import { Queue } from 'bullmq';
 
 import { env } from '../config/env';
+import { DELIVERY_BACKOFF_STRATEGY } from '../services/delivery-backoff';
 
 export const DELIVERY_QUEUE_NAME = 'webhook-deliveries';
 export const DELIVERY_JOB_NAME = 'deliver-webhook';
@@ -30,7 +31,11 @@ export const enqueueDeliveries = async (deliveryAttemptIds: string[]) => {
     deliveryAttemptIds.map((deliveryAttemptId) => ({
       name: DELIVERY_JOB_NAME,
       data: { deliveryAttemptId },
-      opts: { jobId: deliveryAttemptId },
+      opts: {
+        jobId: deliveryAttemptId,
+        attempts: env.DELIVERY_MAX_ATTEMPTS,
+        backoff: { type: DELIVERY_BACKOFF_STRATEGY },
+      },
     })),
   );
 };

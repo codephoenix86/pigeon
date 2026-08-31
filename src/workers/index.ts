@@ -4,6 +4,7 @@ import { Worker } from 'bullmq';
 import { env } from '../config/env';
 import { prisma } from '../db';
 import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queue';
+import { calculateDeliveryBackoff } from '../services/delivery-backoff';
 
 const processDelivery = async (deliveryAttemptId: string) => {
   const delivery = await prisma.deliveryAttempt.findUnique({
@@ -47,6 +48,9 @@ export const deliveryWorker = new Worker<DeliveryJobData, void, typeof DELIVERY_
       url: env.REDIS_URL,
       // BullMQ requires unlimited command retries for a worker's blocking connection.
       maxRetriesPerRequest: null,
+    },
+    settings: {
+      backoffStrategy: (attemptsMade) => calculateDeliveryBackoff(attemptsMade),
     },
   },
 );
