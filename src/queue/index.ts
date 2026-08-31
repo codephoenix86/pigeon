@@ -20,3 +20,17 @@ export const deliveryQueue = new Queue<DeliveryJobData, void, typeof DELIVERY_JO
     },
   },
 );
+
+export const enqueueDeliveries = async (deliveryAttemptIds: string[]) => {
+  if (deliveryAttemptIds.length === 0) {
+    return;
+  }
+
+  await deliveryQueue.addBulk(
+    deliveryAttemptIds.map((deliveryAttemptId) => ({
+      name: DELIVERY_JOB_NAME,
+      data: { deliveryAttemptId },
+      opts: { jobId: deliveryAttemptId },
+    })),
+  );
+};
