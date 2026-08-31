@@ -2,9 +2,14 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { prisma } from './db';
 import { deliveryDeadLetterQueue, deliveryQueue } from './queue';
+import {
+  startDeliveryOutboxPublisher,
+  stopDeliveryOutboxPublisher,
+} from './services/delivery-outbox-service';
 import { deliveryWorker } from './workers';
 
 const closeInfrastructure = async () => {
+  await stopDeliveryOutboxPublisher();
   await deliveryWorker.close();
   await Promise.all([deliveryQueue.close(), deliveryDeadLetterQueue.close(), prisma.$disconnect()]);
 };
@@ -32,6 +37,8 @@ const start = async () => {
     process.exitCode = 1;
     return;
   }
+
+  startDeliveryOutboxPublisher();
 
   const app = createApp();
   const server = app.listen(env.PORT, env.HOST, () => {

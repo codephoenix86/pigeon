@@ -2,7 +2,7 @@ import { DeliveryStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 
 import { prisma } from '../db';
 import { AppError } from '../errors/app-error';
-import { enqueueDeliveries } from '../queue';
+import { publishDeliveryOutboxEntries } from './delivery-outbox-service';
 
 export type CreateEventInput = {
   type: string;
@@ -43,13 +43,27 @@ export const createEvent = async (clientId: string, input: CreateEventInput) => 
       select: { id: true },
     });
 
+    if (deliveryAttempts.length > 0) {
+      await transaction.deliveryOutbox.createMany({
+        data: deliveryAttempts.map((deliveryAttempt) => ({
+          deliveryAttemptId: deliveryAttempt.id,
+        })),
+      });
+    }
+
     return {
       event,
       deliveryAttemptIds: deliveryAttempts.map((deliveryAttempt) => deliveryAttempt.id),
     };
   });
 
-  await enqueueDeliveries(deliveryAttemptIds);
+  try {
+    await publishDeliveryOutboxEntries(deliveryAttemptIds);
+  } catch (error) {
+    // The enqueue intent is durable. The background publisher will retry it,
+    // so a temporary Redis outage must not turn an accepted event into a 500.
+    console.error('Immediate delivery outbox publish failed; deferring to retry publisher', error);
+  }
 
   return { event, deliveryCount: deliveryAttemptIds.length };
 };
