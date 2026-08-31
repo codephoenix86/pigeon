@@ -1,9 +1,14 @@
-import { SubscriptionStatus } from '@prisma/client';
-import { Worker } from 'bullmq';
+import { DeliveryStatus, SubscriptionStatus } from '@prisma/client';
+import { Job, Worker } from 'bullmq';
 
 import { env } from '../config/env';
 import { prisma } from '../db';
-import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queue';
+import {
+  DELIVERY_JOB_NAME,
+  DELIVERY_QUEUE_NAME,
+  DeliveryJobData,
+  enqueueDeadLetteredDelivery,
+} from '../queue';
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
 
 const processDelivery = async (deliveryAttemptId: string) => {
@@ -40,9 +45,53 @@ const processDelivery = async (deliveryAttemptId: string) => {
   }
 };
 
+const hasExhaustedAttempts = (job: Job<DeliveryJobData>): boolean =>
+  job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+
+const deadLetterDelivery = async (
+  deliveryAttemptId: string,
+  attemptsMade: number,
+  error: unknown,
+) => {
+  const failedReason = error instanceof Error ? error.message : 'Unknown delivery error.';
+  const update = await prisma.deliveryAttempt.updateMany({
+    where: {
+      id: deliveryAttemptId,
+      status: { not: DeliveryStatus.DELIVERED },
+    },
+    data: {
+      status: DeliveryStatus.FAILED_PERMANENT,
+      nextRetryAt: null,
+    },
+  });
+
+  if (update.count === 0) {
+    return;
+  }
+
+  await enqueueDeadLetteredDelivery({
+    deliveryAttemptId,
+    attemptsMade,
+    failedAt: new Date().toISOString(),
+    failedReason,
+  });
+};
+
+const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
+  try {
+    await processDelivery(job.data.deliveryAttemptId);
+  } catch (error) {
+    if (hasExhaustedAttempts(job)) {
+      await deadLetterDelivery(job.data.deliveryAttemptId, job.attemptsMade + 1, error);
+    }
+
+    throw error;
+  }
+};
+
 export const deliveryWorker = new Worker<DeliveryJobData, void, typeof DELIVERY_JOB_NAME>(
   DELIVERY_QUEUE_NAME,
-  (job) => processDelivery(job.data.deliveryAttemptId),
+  processDeliveryJob,
   {
     connection: {
       url: env.REDIS_URL,

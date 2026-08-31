@@ -5,22 +5,36 @@ import { DELIVERY_BACKOFF_STRATEGY } from '../services/delivery-backoff';
 
 export const DELIVERY_QUEUE_NAME = 'webhook-deliveries';
 export const DELIVERY_JOB_NAME = 'deliver-webhook';
+export const DELIVERY_DEAD_LETTER_QUEUE_NAME = 'webhook-deliveries-dlq';
+export const DELIVERY_DEAD_LETTER_JOB_NAME = 'dead-lettered-delivery';
 
 export type DeliveryJobData = {
   deliveryAttemptId: string;
 };
 
+export type DeliveryDeadLetterJobData = DeliveryJobData & {
+  attemptsMade: number;
+  failedAt: string;
+  failedReason: string;
+};
+
+const producerConnection = {
+  url: env.REDIS_URL,
+  // API requests should fail promptly when Redis is unavailable instead of
+  // waiting indefinitely for a command to be retried.
+  maxRetriesPerRequest: 1,
+};
+
 export const deliveryQueue = new Queue<DeliveryJobData, void, typeof DELIVERY_JOB_NAME>(
   DELIVERY_QUEUE_NAME,
-  {
-    connection: {
-      url: env.REDIS_URL,
-      // API requests should fail promptly when Redis is unavailable instead of
-      // waiting indefinitely for a command to be retried.
-      maxRetriesPerRequest: 1,
-    },
-  },
+  { connection: producerConnection },
 );
+
+export const deliveryDeadLetterQueue = new Queue<
+  DeliveryDeadLetterJobData,
+  void,
+  typeof DELIVERY_DEAD_LETTER_JOB_NAME
+>(DELIVERY_DEAD_LETTER_QUEUE_NAME, { connection: producerConnection });
 
 export const enqueueDeliveries = async (deliveryAttemptIds: string[]) => {
   if (deliveryAttemptIds.length === 0) {
@@ -38,4 +52,10 @@ export const enqueueDeliveries = async (deliveryAttemptIds: string[]) => {
       },
     })),
   );
+};
+
+export const enqueueDeadLetteredDelivery = async (data: DeliveryDeadLetterJobData) => {
+  await deliveryDeadLetterQueue.add(DELIVERY_DEAD_LETTER_JOB_NAME, data, {
+    jobId: data.deliveryAttemptId,
+  });
 };
