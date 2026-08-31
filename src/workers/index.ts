@@ -3,13 +3,9 @@ import { DelayedError, Job, Worker } from 'bullmq';
 
 import { env } from '../config/env';
 import { prisma } from '../db';
-import {
-  DELIVERY_JOB_NAME,
-  DELIVERY_QUEUE_NAME,
-  DeliveryJobData,
-  enqueueDeadLetteredDelivery,
-} from '../queue';
+import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queue';
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
+import { publishDeadLetterOutboxEntries } from '../services/delivery-dead-letter-outbox-service';
 
 const activeDeliveriesBySubscription = new Map<string, number>();
 const retryDelayByJobId = new Map<string, number>();
@@ -112,28 +108,55 @@ const deadLetterDelivery = async (
   httpStatus: number | null,
 ) => {
   const failedReason = error instanceof Error ? error.message : 'Unknown delivery error.';
-  const update = await prisma.deliveryAttempt.updateMany({
-    where: {
-      id: deliveryAttemptId,
-      status: { not: DeliveryStatus.DELIVERED },
-    },
-    data: {
-      status: DeliveryStatus.FAILED_PERMANENT,
-      httpStatus,
-      nextRetryAt: null,
-    },
+  const failedAt = new Date();
+  const recorded = await prisma.$transaction(async (transaction) => {
+    const update = await transaction.deliveryAttempt.updateMany({
+      where: {
+        id: deliveryAttemptId,
+        status: {
+          notIn: [DeliveryStatus.DELIVERED, DeliveryStatus.FAILED_PERMANENT],
+        },
+      },
+      data: {
+        status: DeliveryStatus.FAILED_PERMANENT,
+        httpStatus,
+        nextRetryAt: null,
+      },
+    });
+
+    if (update.count === 0) {
+      return false;
+    }
+
+    await transaction.deliveryDeadLetterOutbox.createMany({
+      data: [
+        {
+          deliveryAttemptId,
+          attemptsMade,
+          failedAt,
+          failedReason,
+        },
+      ],
+      skipDuplicates: true,
+    });
+
+    return true;
   });
 
-  if (update.count === 0) {
+  if (!recorded) {
     return;
   }
 
-  await enqueueDeadLetteredDelivery({
-    deliveryAttemptId,
-    attemptsMade,
-    failedAt: new Date().toISOString(),
-    failedReason,
-  });
+  try {
+    await publishDeadLetterOutboxEntries([deliveryAttemptId]);
+  } catch (publishError) {
+    // Terminal status and DLQ intent are already durable. The background
+    // publisher will retry without consuming another webhook attempt.
+    console.error('Immediate dead-letter outbox publish failed; deferring to retry publisher', {
+      deliveryAttemptId,
+      error: publishError,
+    });
+  }
 };
 
 const processDeliveryJob = async (job: Job<DeliveryJobData>) => {

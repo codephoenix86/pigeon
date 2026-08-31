@@ -54,8 +54,16 @@ export const enqueueDeliveries = async (deliveryAttemptIds: string[]) => {
   );
 };
 
-export const enqueueDeadLetteredDelivery = async (data: DeliveryDeadLetterJobData) => {
-  await deliveryDeadLetterQueue.add(DELIVERY_DEAD_LETTER_JOB_NAME, data, {
-    jobId: data.deliveryAttemptId,
-  });
+export const enqueueDeadLetteredDeliveries = async (entries: DeliveryDeadLetterJobData[]) => {
+  if (entries.length === 0) {
+    return;
+  }
+
+  await deliveryDeadLetterQueue.addBulk(
+    entries.map((data) => ({
+      name: DELIVERY_DEAD_LETTER_JOB_NAME,
+      data,
+      opts: { jobId: data.deliveryAttemptId },
+    })),
+  );
 };
