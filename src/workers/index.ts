@@ -6,8 +6,11 @@ import { prisma } from '../db';
 import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queue';
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
 import { publishDeadLetterOutboxEntries } from '../services/delivery-dead-letter-outbox-service';
+import {
+  SubscriptionConcurrencyLease,
+  tryAcquireSubscriptionLease,
+} from '../services/subscription-concurrency-service';
 
-const activeDeliveriesBySubscription = new Map<string, number>();
 const retryDelayByJobId = new Map<string, number>();
 
 class WebhookResponseError extends Error {
@@ -33,27 +36,6 @@ const loadDelivery = (deliveryAttemptId: string) =>
       },
     },
   });
-
-const tryAcquireSubscription = (subscriptionId: string): boolean => {
-  const activeCount = activeDeliveriesBySubscription.get(subscriptionId) ?? 0;
-
-  if (activeCount >= env.DELIVERY_SUBSCRIPTION_CONCURRENCY) {
-    return false;
-  }
-
-  activeDeliveriesBySubscription.set(subscriptionId, activeCount + 1);
-  return true;
-};
-
-const releaseSubscription = (subscriptionId: string) => {
-  const activeCount = activeDeliveriesBySubscription.get(subscriptionId) ?? 0;
-
-  if (activeCount <= 1) {
-    activeDeliveriesBySubscription.delete(subscriptionId);
-  } else {
-    activeDeliveriesBySubscription.set(subscriptionId, activeCount - 1);
-  }
-};
 
 type LoadedDelivery = NonNullable<Awaited<ReturnType<typeof loadDelivery>>>;
 
@@ -160,7 +142,7 @@ const deadLetterDelivery = async (
 };
 
 const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
-  let acquiredSubscriptionId: string | undefined;
+  let subscriptionLease: SubscriptionConcurrencyLease | undefined;
   let currentAttemptId: string | undefined;
   let httpStatus: number | null = null;
 
@@ -173,13 +155,14 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
     }
 
     const subscriptionId = delivery.subscription.id;
+    const acquiredLease = await tryAcquireSubscriptionLease(subscriptionId);
 
-    if (!tryAcquireSubscription(subscriptionId)) {
+    if (!acquiredLease) {
       await job.moveToDelayed(Date.now() + env.DELIVERY_THROTTLE_DELAY_MS, job.token);
       throw new DelayedError();
     }
 
-    acquiredSubscriptionId = subscriptionId;
+    subscriptionLease = acquiredLease;
     const attemptNumber = job.attemptsMade + 1;
     const attempt = await startDeliveryAttempt(delivery, attemptNumber);
     currentAttemptId = attempt.id;
@@ -228,8 +211,14 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
 
     throw error;
   } finally {
-    if (acquiredSubscriptionId) {
-      releaseSubscription(acquiredSubscriptionId);
+    if (subscriptionLease) {
+      try {
+        await subscriptionLease.release();
+      } catch (releaseError) {
+        // The renewable lease has a TTL, so a failed explicit release cannot
+        // hold subscription capacity forever or change the delivery result.
+        console.error('Failed to release subscription concurrency lease', releaseError);
+      }
     }
   }
 };

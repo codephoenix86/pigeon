@@ -10,12 +10,21 @@ import {
   startDeliveryOutboxPublisher,
   stopDeliveryOutboxPublisher,
 } from './services/delivery-outbox-service';
+import {
+  closeSubscriptionConcurrency,
+  waitForSubscriptionConcurrency,
+} from './services/subscription-concurrency-service';
 import { deliveryWorker } from './workers';
 
 const closeInfrastructure = async () => {
   await Promise.all([stopDeliveryOutboxPublisher(), stopDeadLetterOutboxPublisher()]);
   await deliveryWorker.close();
-  await Promise.all([deliveryQueue.close(), deliveryDeadLetterQueue.close(), prisma.$disconnect()]);
+  await Promise.all([
+    deliveryQueue.close(),
+    deliveryDeadLetterQueue.close(),
+    closeSubscriptionConcurrency(),
+    prisma.$disconnect(),
+  ]);
 };
 
 const start = async () => {
@@ -34,6 +43,7 @@ const start = async () => {
       deliveryQueue.waitUntilReady(),
       deliveryDeadLetterQueue.waitUntilReady(),
       deliveryWorker.waitUntilReady(),
+      waitForSubscriptionConcurrency(),
     ]);
   } catch (error) {
     console.error('Failed to connect to Redis', error);
