@@ -2,8 +2,10 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { prisma } from './db';
 import { deliveryQueue } from './queue';
+import { deliveryWorker } from './workers';
 
 const closeInfrastructure = async () => {
+  await deliveryWorker.close();
   await Promise.all([deliveryQueue.close(), prisma.$disconnect()]);
 };
 
@@ -11,9 +13,12 @@ const start = async () => {
   deliveryQueue.on('error', (error) => {
     console.error('Delivery queue error', error);
   });
+  deliveryWorker.on('error', (error) => {
+    console.error('Delivery worker error', error);
+  });
 
   try {
-    await deliveryQueue.waitUntilReady();
+    await Promise.all([deliveryQueue.waitUntilReady(), deliveryWorker.waitUntilReady()]);
   } catch (error) {
     console.error('Failed to connect to Redis', error);
     await closeInfrastructure();

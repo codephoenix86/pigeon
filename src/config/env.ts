@@ -12,6 +12,7 @@ const environmentSchema = z.object({
     .url()
     .default('postgresql://postgres@localhost:5432/pigeon?schema=public'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
+  DELIVERY_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(10_000),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
