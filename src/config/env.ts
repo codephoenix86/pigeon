@@ -15,6 +15,9 @@ const environmentSchema = z.object({
   DELIVERY_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(10_000),
   DELIVERY_MAX_ATTEMPTS: z.coerce.number().int().min(5).max(7).default(6),
   DELIVERY_BACKOFF_JITTER: z.coerce.number().min(0).max(0.5).default(0.2),
+  DELIVERY_WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+  DELIVERY_SUBSCRIPTION_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(1),
+  DELIVERY_THROTTLE_DELAY_MS: z.coerce.number().int().positive().max(60_000).default(1_000),
 });
 
 const parsedEnvironment = environmentSchema.safeParse(process.env);
