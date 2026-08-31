@@ -1,26 +1,71 @@
 import { createApp } from './app';
 import { env } from './config/env';
+import { prisma } from './db';
+import { deliveryQueue } from './queue';
 
-const app = createApp();
-
-const server = app.listen(env.PORT, env.HOST, () => {
-  console.info(`Pigeon listening on http://${env.HOST}:${env.PORT}`);
-});
-
-server.on('error', (error) => {
-  console.error('Failed to start HTTP server', error);
-  process.exitCode = 1;
-});
-
-const shutdown = (signal: string) => {
-  console.info(`${signal} received; shutting down`);
-  server.close((error) => {
-    if (error) {
-      console.error('Failed to close HTTP server', error);
-      process.exitCode = 1;
-    }
-  });
+const closeInfrastructure = async () => {
+  await Promise.all([deliveryQueue.close(), prisma.$disconnect()]);
 };
 
-process.once('SIGINT', () => shutdown('SIGINT'));
-process.once('SIGTERM', () => shutdown('SIGTERM'));
+const start = async () => {
+  deliveryQueue.on('error', (error) => {
+    console.error('Delivery queue error', error);
+  });
+
+  try {
+    await deliveryQueue.waitUntilReady();
+  } catch (error) {
+    console.error('Failed to connect to Redis', error);
+    await closeInfrastructure();
+    process.exitCode = 1;
+    return;
+  }
+
+  const app = createApp();
+  const server = app.listen(env.PORT, env.HOST, () => {
+    console.info(`Pigeon listening on http://${env.HOST}:${env.PORT}`);
+  });
+
+  server.on('error', (error) => {
+    console.error('Failed to start HTTP server', error);
+    process.exitCode = 1;
+  });
+
+  let isShuttingDown = false;
+
+  const shutdown = (signal: string) => {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    console.info(`${signal} received; shutting down`);
+    server.close(async (error) => {
+      if (error) {
+        console.error('Failed to close HTTP server', error);
+        process.exitCode = 1;
+      }
+
+      try {
+        await closeInfrastructure();
+      } catch (infrastructureError) {
+        console.error('Failed to close infrastructure connections', infrastructureError);
+        process.exitCode = 1;
+      }
+    });
+  };
+
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+};
+
+void start().catch((error: unknown) => {
+  console.error('Failed to start Pigeon', error);
+  closeInfrastructure()
+    .catch((infrastructureError: unknown) => {
+      console.error('Failed to close infrastructure connections', infrastructureError);
+    })
+    .finally(() => {
+      process.exitCode = 1;
+    });
+});
