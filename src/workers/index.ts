@@ -10,6 +10,7 @@ import {
   SubscriptionConcurrencyLease,
   tryAcquireSubscriptionLease,
 } from '../services/subscription-concurrency-service';
+import { signWebhookPayload } from '../services/webhook-signature';
 
 const retryDelayByJobId = new Map<string, number>();
 
@@ -30,6 +31,7 @@ const loadDelivery = (deliveryAttemptId: string) =>
       subscription: {
         select: {
           id: true,
+          secret: true,
           status: true,
           targetUrl: true,
         },
@@ -63,10 +65,15 @@ const startDeliveryAttempt = (delivery: LoadedDelivery, attemptNumber: number) =
   });
 
 const postDelivery = async (delivery: LoadedDelivery) => {
+  const body = JSON.stringify(delivery.event.payload);
+  const signature = signWebhookPayload(body, delivery.subscription.secret);
   const response = await fetch(delivery.subscription.targetUrl, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(delivery.event.payload),
+    headers: {
+      'content-type': 'application/json',
+      'X-Webhook-Signature': signature,
+    },
+    body,
     redirect: 'manual',
     signal: AbortSignal.timeout(env.DELIVERY_TIMEOUT_MS),
   });
