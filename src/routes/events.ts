@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import { authenticate } from '../middleware/authenticate';
+import { ingestionRateLimiter } from '../middleware/ingestion-rate-limit';
 import { createEvent, listEventDeliveries } from '../services/event-service';
 
 const idParamsSchema = z.object({ id: z.string().uuid() });
@@ -32,7 +33,7 @@ export const eventsRouter = Router();
 
 eventsRouter.use(authenticate);
 
-eventsRouter.post('/', async (request, response) => {
+eventsRouter.post('/', ingestionRateLimiter, async (request, response) => {
   const input = createEventSchema.parse(request.body);
   const result = await createEvent(clientId(request), {
     ...input,
