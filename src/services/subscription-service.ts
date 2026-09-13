@@ -4,6 +4,7 @@ import { SubscriptionStatus } from '@prisma/client';
 
 import { prisma } from '../db';
 import { AppError } from '../errors/app-error';
+import { validateWebhookTargetUrl } from './webhook-target-validator';
 
 const subscriptionFields = {
   id: true,
@@ -37,9 +38,10 @@ const findOwnedSubscriptionOrThrow = async (clientId: string, id: string) => {
 };
 
 export const createSubscription = async (clientId: string, input: CreateSubscriptionInput) => {
+  const targetUrl = await validateWebhookTargetUrl(input.targetUrl);
   const secret = randomBytes(32).toString('base64url');
   const subscription = await prisma.subscription.create({
-    data: { ...input, clientId, secret },
+    data: { ...input, targetUrl, clientId, secret },
     select: subscriptionFields,
   });
 
@@ -62,10 +64,13 @@ export const updateSubscription = async (
   input: UpdateSubscriptionInput,
 ) => {
   await findOwnedSubscriptionOrThrow(clientId, id);
+  const data = input.targetUrl
+    ? { ...input, targetUrl: await validateWebhookTargetUrl(input.targetUrl) }
+    : input;
 
   return prisma.subscription.update({
     where: { id },
-    data: input,
+    data,
     select: subscriptionFields,
   });
 };
