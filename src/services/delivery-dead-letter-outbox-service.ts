@@ -1,6 +1,9 @@
 import { env } from '../config/env';
+import { logger } from '../config/logger';
 import { prisma } from '../db';
 import { enqueueDeadLetteredDeliveries } from '../queue';
+
+const outboxLogger = logger.child({ component: 'dead-letter-outbox-publisher' });
 
 const publishDeadLetterOutboxBatch = async (deliveryAttemptIds?: string[]): Promise<number> => {
   const entries = await prisma.deliveryDeadLetterOutbox.findMany({
@@ -69,7 +72,7 @@ const pollDeadLetterOutbox = () => {
   publishInFlight = publishDeadLetterOutboxBatch()
     .then(() => undefined)
     .catch((error: unknown) => {
-      console.error('Delivery dead-letter outbox publish failed; will retry', error);
+      outboxLogger.error({ err: error }, 'Delivery dead-letter outbox publish failed; will retry');
     })
     .finally(() => {
       publishInFlight = undefined;

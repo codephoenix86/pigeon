@@ -41,7 +41,8 @@ export const errorHandler: ErrorRequestHandler = (error: unknown, _request, resp
     return;
   }
 
-  console.error('Unhandled request error', error);
+  response.err =
+    error instanceof Error ? error : new Error('Unknown request error', { cause: error });
   response.status(500).json({
     error: {
       code: 'INTERNAL_ERROR',

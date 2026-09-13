@@ -2,6 +2,7 @@ import { DeliveryStatus, SubscriptionStatus } from '@prisma/client';
 import { DelayedError, Job, Worker } from 'bullmq';
 
 import { env } from '../config/env';
+import { logger } from '../config/logger';
 import { prisma } from '../db';
 import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queue';
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
@@ -13,6 +14,7 @@ import {
 import { createWebhookTimestamp, signWebhookPayload } from '../services/webhook-signature';
 
 const retryDelayByJobId = new Map<string, number>();
+const workerLogger = logger.child({ component: 'delivery-worker' });
 
 class WebhookResponseError extends Error {
   constructor(readonly httpStatus: number) {
@@ -149,14 +151,23 @@ const deadLetterDelivery = async (
   } catch (publishError) {
     // Terminal status and DLQ intent are already durable. The background
     // publisher will retry without consuming another webhook attempt.
-    console.error('Immediate dead-letter outbox publish failed; deferring to retry publisher', {
-      deliveryAttemptId,
-      error: publishError,
-    });
+    workerLogger.error(
+      { err: publishError, deliveryAttemptId },
+      'Immediate dead-letter outbox publish failed; deferring to retry publisher',
+    );
   }
+
+  workerLogger.warn(
+    { deliveryAttemptId, attemptsMade, httpStatus, err: error },
+    'Webhook delivery permanently failed',
+  );
 };
 
 const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
+  const jobLogger = workerLogger.child({
+    jobId: job.id,
+    deliveryAttemptId: job.data.deliveryAttemptId,
+  });
   let subscriptionLease: SubscriptionConcurrencyLease | undefined;
   let currentAttemptId: string | undefined;
   let httpStatus: number | null = null;
@@ -166,6 +177,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
 
     // A deleted delivery or disabled subscription makes the queued work stale.
     if (!delivery || delivery.subscription.status !== SubscriptionStatus.ACTIVE) {
+      jobLogger.info('Skipping stale webhook delivery job');
       return;
     }
 
@@ -173,6 +185,10 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
     const acquiredLease = await tryAcquireSubscriptionLease(subscriptionId);
 
     if (!acquiredLease) {
+      jobLogger.debug(
+        { subscriptionId, delayMs: env.DELIVERY_THROTTLE_DELAY_MS },
+        'Delaying webhook delivery because subscription concurrency is exhausted',
+      );
       await job.moveToDelayed(Date.now() + env.DELIVERY_THROTTLE_DELAY_MS, job.token);
       throw new DelayedError();
     }
@@ -191,6 +207,15 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
         nextRetryAt: null,
       },
     });
+    jobLogger.info(
+      {
+        attemptId: currentAttemptId,
+        attemptNumber,
+        subscriptionId,
+        httpStatus,
+      },
+      'Webhook delivered',
+    );
   } catch (error) {
     if (error instanceof DelayedError) {
       throw error;
@@ -209,6 +234,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
       );
     } else if (currentAttemptId) {
       const retryDelay = calculateDeliveryBackoff(job.attemptsMade + 1);
+      const nextRetryAt = new Date(Date.now() + retryDelay);
 
       if (job.id) {
         retryDelayByJobId.set(job.id, retryDelay);
@@ -219,9 +245,20 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
         data: {
           status: DeliveryStatus.RETRY_SCHEDULED,
           httpStatus,
-          nextRetryAt: new Date(Date.now() + retryDelay),
+          nextRetryAt,
         },
       });
+      jobLogger.warn(
+        {
+          err: error,
+          attemptId: currentAttemptId,
+          attemptNumber: job.attemptsMade + 1,
+          httpStatus,
+          nextRetryAt,
+          retryDelayMs: retryDelay,
+        },
+        'Webhook delivery failed; retry scheduled',
+      );
     }
 
     throw error;
@@ -232,7 +269,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
       } catch (releaseError) {
         // The renewable lease has a TTL, so a failed explicit release cannot
         // hold subscription capacity forever or change the delivery result.
-        console.error('Failed to release subscription concurrency lease', releaseError);
+        jobLogger.error({ err: releaseError }, 'Failed to release subscription concurrency lease');
       }
     }
   }

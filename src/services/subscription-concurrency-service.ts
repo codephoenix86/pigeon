@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 
 import { env } from '../config/env';
+import { logger } from '../config/logger';
+
+const concurrencyLogger = logger.child({ component: 'subscription-concurrency' });
 
 const LEASE_TTL_MS = Math.max(env.DELIVERY_TIMEOUT_MS + 15_000, 30_000);
 const LEASE_RENEW_INTERVAL_MS = Math.floor(LEASE_TTL_MS / 3);
@@ -55,7 +58,7 @@ const redis = new Redis(env.REDIS_URL, {
 });
 
 redis.on('error', (error) => {
-  console.error('Subscription concurrency Redis error', error);
+  concurrencyLogger.error({ err: error }, 'Subscription concurrency Redis error');
 });
 
 const leaseKey = (subscriptionId: string) => `${LEASE_KEY_PREFIX}:${subscriptionId}`;
@@ -98,18 +101,17 @@ export const tryAcquireSubscriptionLease = async (
       const renewed = Number(await redis.eval(RENEW_LEASE_SCRIPT, 1, key, LEASE_TTL_MS, token));
 
       if (renewed !== 1 && !isReleased) {
-        console.error('Subscription concurrency lease expired before release', {
-          subscriptionId,
-          token,
-        });
+        concurrencyLogger.warn(
+          { subscriptionId, leaseToken: token },
+          'Subscription concurrency lease expired before release',
+        );
       }
     } catch (error) {
       if (!isReleased) {
-        console.error('Failed to renew subscription concurrency lease', {
-          subscriptionId,
-          token,
-          error,
-        });
+        concurrencyLogger.error(
+          { err: error, subscriptionId, leaseToken: token },
+          'Failed to renew subscription concurrency lease',
+        );
       }
     } finally {
       renewalInFlight = false;

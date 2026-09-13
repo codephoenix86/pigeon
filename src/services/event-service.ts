@@ -1,5 +1,6 @@
 import { DeliveryStatus, Prisma, SubscriptionStatus } from '@prisma/client';
 
+import { getLogger } from '../config/logger';
 import { prisma } from '../db';
 import { AppError } from '../errors/app-error';
 import { publishDeliveryOutboxEntries } from './delivery-outbox-service';
@@ -62,7 +63,10 @@ export const createEvent = async (clientId: string, input: CreateEventInput) => 
   } catch (error) {
     // The enqueue intent is durable. The background publisher will retry it,
     // so a temporary Redis outage must not turn an accepted event into a 500.
-    console.error('Immediate delivery outbox publish failed; deferring to retry publisher', error);
+    getLogger().error(
+      { err: error, eventId: event.id, deliveryCount: deliveryAttemptIds.length },
+      'Immediate delivery outbox publish failed; deferring to retry publisher',
+    );
   }
 
   return { event, deliveryCount: deliveryAttemptIds.length };

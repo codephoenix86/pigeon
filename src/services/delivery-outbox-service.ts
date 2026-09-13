@@ -1,6 +1,9 @@
 import { env } from '../config/env';
+import { logger } from '../config/logger';
 import { prisma } from '../db';
 import { enqueueDeliveries } from '../queue';
+
+const outboxLogger = logger.child({ component: 'delivery-outbox-publisher' });
 
 const publishOutboxBatch = async (deliveryAttemptIds?: string[]): Promise<number> => {
   const entries = await prisma.deliveryOutbox.findMany({
@@ -62,7 +65,7 @@ const pollDeliveryOutbox = () => {
   publishInFlight = publishOutboxBatch()
     .then(() => undefined)
     .catch((error: unknown) => {
-      console.error('Delivery outbox publish failed; will retry', error);
+      outboxLogger.error({ err: error }, 'Delivery outbox publish failed; will retry');
     })
     .finally(() => {
       publishInFlight = undefined;

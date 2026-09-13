@@ -1,3 +1,4 @@
+import { logger } from '../config/logger';
 import { prisma } from '../db';
 import { createClient } from '../services/client-service';
 
@@ -6,13 +7,13 @@ const run = async () => {
 
   // This is an explicit provisioning command, the sole intentional exposure of
   // this credential. Application request logging never includes API keys.
-  console.info(`Client ID: ${client.id}`);
-  console.info(`API key (save it now; it will not be shown again): ${apiKey}`);
+  process.stdout.write(`Client ID: ${client.id}\n`);
+  process.stdout.write(`API key (save it now; it will not be shown again): ${apiKey}\n`);
 };
 
 run()
   .catch((error: unknown) => {
-    console.error('Failed to provision client.', error);
+    logger.error({ err: error, component: 'client-provisioning' }, 'Failed to provision client');
     process.exitCode = 1;
   })
   .finally(async () => {

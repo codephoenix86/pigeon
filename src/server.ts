@@ -1,5 +1,6 @@
 import { createApp } from './app';
 import { env } from './config/env';
+import { logger } from './config/logger';
 import { prisma } from './db';
 import { deliveryDeadLetterQueue, deliveryQueue } from './queue';
 import {
@@ -16,6 +17,8 @@ import {
 } from './services/subscription-concurrency-service';
 import { deliveryWorker } from './workers';
 
+const serverLogger = logger.child({ component: 'server' });
+
 const closeInfrastructure = async () => {
   await Promise.all([stopDeliveryOutboxPublisher(), stopDeadLetterOutboxPublisher()]);
   await deliveryWorker.close();
@@ -29,13 +32,13 @@ const closeInfrastructure = async () => {
 
 const start = async () => {
   deliveryQueue.on('error', (error) => {
-    console.error('Delivery queue error', error);
+    serverLogger.error({ err: error, queue: 'delivery' }, 'Delivery queue error');
   });
   deliveryDeadLetterQueue.on('error', (error) => {
-    console.error('Delivery dead-letter queue error', error);
+    serverLogger.error({ err: error, queue: 'delivery-dead-letter' }, 'Delivery queue error');
   });
   deliveryWorker.on('error', (error) => {
-    console.error('Delivery worker error', error);
+    serverLogger.error({ err: error }, 'Delivery worker error');
   });
 
   try {
@@ -46,7 +49,7 @@ const start = async () => {
       waitForSubscriptionConcurrency(),
     ]);
   } catch (error) {
-    console.error('Failed to connect to Redis', error);
+    serverLogger.fatal({ err: error }, 'Failed to connect to Redis');
     await closeInfrastructure();
     process.exitCode = 1;
     return;
@@ -57,11 +60,11 @@ const start = async () => {
 
   const app = createApp();
   const server = app.listen(env.PORT, env.HOST, () => {
-    console.info(`Pigeon listening on http://${env.HOST}:${env.PORT}`);
+    serverLogger.info({ host: env.HOST, port: env.PORT }, 'Pigeon HTTP server listening');
   });
 
   server.on('error', (error) => {
-    console.error('Failed to start HTTP server', error);
+    serverLogger.fatal({ err: error }, 'HTTP server error');
     process.exitCode = 1;
   });
 
@@ -73,17 +76,20 @@ const start = async () => {
     }
 
     isShuttingDown = true;
-    console.info(`${signal} received; shutting down`);
+    serverLogger.info({ signal }, 'Shutdown signal received');
     server.close(async (error) => {
       if (error) {
-        console.error('Failed to close HTTP server', error);
+        serverLogger.error({ err: error }, 'Failed to close HTTP server');
         process.exitCode = 1;
       }
 
       try {
         await closeInfrastructure();
       } catch (infrastructureError) {
-        console.error('Failed to close infrastructure connections', infrastructureError);
+        serverLogger.error(
+          { err: infrastructureError },
+          'Failed to close infrastructure connections',
+        );
         process.exitCode = 1;
       }
     });
@@ -94,10 +100,13 @@ const start = async () => {
 };
 
 void start().catch((error: unknown) => {
-  console.error('Failed to start Pigeon', error);
+  serverLogger.fatal({ err: error }, 'Failed to start Pigeon');
   closeInfrastructure()
     .catch((infrastructureError: unknown) => {
-      console.error('Failed to close infrastructure connections', infrastructureError);
+      serverLogger.error(
+        { err: infrastructureError },
+        'Failed to close infrastructure connections',
+      );
     })
     .finally(() => {
       process.exitCode = 1;
