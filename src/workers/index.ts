@@ -64,14 +64,20 @@ const startDeliveryAttempt = (delivery: LoadedDelivery, attemptNumber: number) =
     select: { id: true },
   });
 
-const postDelivery = async (delivery: LoadedDelivery) => {
+const postDelivery = async (delivery: LoadedDelivery, deliveryAttemptId: string) => {
   const body = JSON.stringify(delivery.event.payload);
   const timestamp = createWebhookTimestamp();
-  const signature = signWebhookPayload(body, delivery.subscription.secret, timestamp);
+  const signature = signWebhookPayload(
+    body,
+    delivery.subscription.secret,
+    timestamp,
+    deliveryAttemptId,
+  );
   const response = await fetch(delivery.subscription.targetUrl, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      'X-Delivery-Id': deliveryAttemptId,
       'X-Webhook-Signature': signature,
       'X-Webhook-Timestamp': timestamp,
     },
@@ -175,7 +181,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
     const attemptNumber = job.attemptsMade + 1;
     const attempt = await startDeliveryAttempt(delivery, attemptNumber);
     currentAttemptId = attempt.id;
-    httpStatus = await postDelivery(delivery);
+    httpStatus = await postDelivery(delivery, currentAttemptId);
 
     await prisma.deliveryAttempt.update({
       where: { id: currentAttemptId },
