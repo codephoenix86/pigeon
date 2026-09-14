@@ -1,25 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
-import { z } from 'zod';
 
 import { authenticate } from '../middleware/authenticate';
 import { ingestionRateLimiter } from '../middleware/ingestion-rate-limit';
 import { createEvent, listEventDeliveries } from '../services/event-service';
-
-const idParamsSchema = z.object({ id: z.string().uuid() });
-
-const createEventSchema = z
-  .object({
-    type: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, 'Must be a valid event type.'),
-    payload: z.record(z.string(), z.unknown()),
-    source: z.string().trim().min(1).max(255).optional(),
-  })
-  .strict();
+import { createEventSchema, idParamsSchema } from '../validation/request-schemas';
 
 const clientId = (request: { clientId?: string }): string => {
   if (!request.clientId) {

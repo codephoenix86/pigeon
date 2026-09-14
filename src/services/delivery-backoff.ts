@@ -13,12 +13,12 @@ const RETRY_DELAYS_MS = [
 export const calculateDeliveryBackoff = (
   attemptsMade: number,
   jitterValue = Math.random(),
+  jitterRatio = env.DELIVERY_BACKOFF_JITTER,
 ): number => {
   const retryIndex = Math.min(Math.max(attemptsMade - 1, 0), RETRY_DELAYS_MS.length - 1);
   const baseDelay = RETRY_DELAYS_MS[retryIndex];
   const boundedJitterValue = Math.min(Math.max(jitterValue, 0), 1);
-  const jitterMultiplier =
-    1 - env.DELIVERY_BACKOFF_JITTER + 2 * env.DELIVERY_BACKOFF_JITTER * boundedJitterValue;
+  const jitterMultiplier = 1 - jitterRatio + 2 * jitterRatio * boundedJitterValue;
 
   return Math.round(baseDelay * jitterMultiplier);
 };

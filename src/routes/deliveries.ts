@@ -1,15 +1,8 @@
 import { Router } from 'express';
-import { z } from 'zod';
 
 import { authenticate } from '../middleware/authenticate';
 import { listFailedDeliveries } from '../services/failed-delivery-service';
-
-const listFailedDeliveriesQuerySchema = z
-  .object({
-    limit: z.coerce.number().int().min(1).max(100).default(50),
-    offset: z.coerce.number().int().min(0).max(100_000).default(0),
-  })
-  .strict();
+import { listFailedDeliveriesQuerySchema } from '../validation/request-schemas';
 
 const clientId = (request: { clientId?: string }): string => {
   if (!request.clientId) {
