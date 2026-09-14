@@ -36,6 +36,38 @@ The API, publishers, and worker run in the same Node.js process. PostgreSQL stor
 
 When a client submits an event, Pigeon atomically stores the event, creates a pending delivery for every matching active subscription, and records outbox entries. It then returns `202 Accepted` without waiting for receivers. The outbox publisher creates BullMQ jobs, and the worker re-checks subscription status before each signed request. Successful requests are resolved on any `2xx` response; failures are retried and eventually recorded as permanent failures and published to the dead-letter queue.
 
+## Design decisions
+
+### At-least-once delivery
+
+Pigeon promises at-least-once rather than exactly-once delivery because it cannot atomically update its database and an arbitrary receiver's state. A receiver can process a request just before the connection times out, or the worker can stop after receiving a successful response but before recording it. Retrying is the only safe way to avoid silently losing those deliveries, and that retry can create a duplicate.
+
+The event, initial delivery attempts, and queue-publication intent are committed in one PostgreSQL transaction. Outbox entries are retried until BullMQ accepts them, using the delivery-attempt ID as the job ID so republishing is idempotent at the queue boundary. Failed requests use bounded backoff before permanent failure is recorded and published to the dead-letter queue. This prevents unbounded retries but means at-least-once is not a promise that an unavailable receiver will eventually succeed.
+
+Each request includes a signed, unique `X-Delivery-Id`. Receivers should store processed IDs and make business operations idempotent. Because retries receive new attempt IDs, receivers that need event-level de-duplication should also include and store a stable business-event identifier in their payload schema.
+
+### BullMQ instead of Kafka or RabbitMQ
+
+BullMQ directly provides the primitives this service needs: delayed jobs, bounded attempts, custom backoff, worker concurrency, and Redis-backed coordination, with a natural Node.js and TypeScript API. Pigeon's routing model is also simple—one independent job per matching subscription—so a retained event stream or a more elaborate broker topology would not improve the current design.
+
+Kafka would be a stronger fit for a high-throughput, replayable event log with partition ordering and multiple independent consumer groups. RabbitMQ would be a strong fit for richer broker-side routing and acknowledgement patterns. Both add operational and application complexity that this service does not currently need. BullMQ's tradeoff is that Redis is not Pigeon's long-term audit log; PostgreSQL remains the system of record, and the transactional outbox bridges database commits to queue publication.
+
+### What changes at 10× scale
+
+The first step would be to measure queue lag, delivery latency, fan-out size, PostgreSQL write load, and per-target failure rates. A tenfold traffic increase alone would not justify replacing the broker. Likely changes are:
+
+| Area               | Current design                                                 | 10× evolution                                                                                           |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Process topology   | API, publishers, and worker share one process                  | Deploy them separately and scale API and worker capacity independently                                  |
+| Event fan-out      | All matching deliveries are created during ingestion           | Persist durable fan-out intent, then create deliveries asynchronously in bounded batches                |
+| PostgreSQL         | One indexed transactional store                                | Add connection pooling, retention/archival, and partition high-volume event and delivery tables         |
+| Outbox             | One polling publisher per outbox                               | Use multiple claim-based publishers with short transactions and `SKIP LOCKED`-style coordination        |
+| Queue              | Shared delivery and dead-letter queues                         | Run highly available Redis and shard queues or worker pools when measured contention requires isolation |
+| Receiver isolation | Distributed per-subscription concurrency leases                | Add per-host and per-client quotas, circuit breakers, and explicit backpressure                         |
+| Operations         | Health checks, process metrics, and failed-delivery inspection | Alert on queue/outbox lag and SLOs, automate retention, and add controlled dead-letter replay           |
+
+If sustained throughput, long-term replay, strict partition ordering, or many independent consumers became core requirements, Kafka would be reconsidered. If complex routing and broker-managed delivery policies became central, RabbitMQ would be reconsidered. Until then, scaling BullMQ workers and PostgreSQL is the smaller and more predictable path.
+
 ## Technology
 
 - Node.js 22 and TypeScript
