@@ -1,0 +1,906 @@
+openapi: 3.1.0
+
+info:
+  title: Pigeon API
+  version: 0.1.0
+  description: |
+    Pigeon accepts events and delivers them asynchronously to matching webhook
+    subscriptions with at-least-once delivery semantics.
+
+    Protected endpoints require the API key created by `npm run client:create`
+    in the `X-API-Key` header. Resources are scoped to the authenticated client.
+    Every response includes an `X-Request-Id` header. A caller may supply a valid
+    request ID using the same header; otherwise Pigeon generates one.
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+
+tags:
+  - name: Subscriptions
+    description: Manage webhook endpoints and their event-type filters.
+  - name: Events
+    description: Ingest events and inspect their delivery history.
+  - name: Deliveries
+    description: Inspect permanently failed deliveries.
+  - name: Operations
+    description: Monitor service health and metrics.
+
+security:
+  - ApiKeyAuth: []
+
+paths:
+  /subscriptions:
+    post:
+      tags: [Subscriptions]
+      summary: Create a webhook subscription
+      description: |
+        Registers a publicly routable HTTPS target. Localhost, private, reserved,
+        and unresolvable targets are rejected. The signing secret is returned only
+        in this response and must be stored securely by the caller.
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+            example:
+              targetUrl: https://receiver.example.com/webhooks/pigeon
+              eventTypes:
+                - order.created
+                - order.paid
+      responses:
+        '201':
+          description: Subscription created. The secret will not be returned again.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSubscriptionResponse'
+              example:
+                subscription:
+                  id: 3b758e7f-52d7-4666-91d8-81672878c02f
+                  targetUrl: https://receiver.example.com/webhooks/pigeon
+                  eventTypes: [order.created, order.paid]
+                  status: ACTIVE
+                  createdAt: '2026-09-14T10:00:00.000Z'
+                  updatedAt: '2026-09-14T10:00:00.000Z'
+                secret: c4s2m4Q3QMe2Tf50cJZGyXAjwZCuSLyFZV3x9O6vs6Y
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    get:
+      tags: [Subscriptions]
+      summary: List subscriptions
+      description: Returns the authenticated client's subscriptions, newest first.
+      operationId: listSubscriptions
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Filter subscriptions by status.
+          schema:
+            $ref: '#/components/schemas/SubscriptionStatus'
+      responses:
+        '200':
+          description: Subscription list.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscriptions]
+                properties:
+                  subscriptions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Subscription'
+              example:
+                subscriptions:
+                  - id: 3b758e7f-52d7-4666-91d8-81672878c02f
+                    targetUrl: https://receiver.example.com/webhooks/pigeon
+                    eventTypes: [order.created, order.paid]
+                    status: ACTIVE
+                    createdAt: '2026-09-14T10:00:00.000Z'
+                    updatedAt: '2026-09-14T10:00:00.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /subscriptions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SubscriptionId'
+
+    get:
+      tags: [Subscriptions]
+      summary: Get a subscription
+      description: Returns an owned subscription. Signing secrets are never included.
+      operationId: getSubscription
+      responses:
+        '200':
+          description: Subscription found.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscription]
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/Subscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Subscriptions]
+      summary: Update a subscription
+      description: |
+        Updates one or more mutable fields. A changed target URL is subject to the
+        same HTTPS and SSRF checks as a newly created subscription.
+      operationId: updateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSubscriptionRequest'
+            examples:
+              disable:
+                summary: Disable delivery
+                value:
+                  status: DISABLED
+              changeEvents:
+                summary: Change subscribed event types
+                value:
+                  eventTypes: [order.paid, order.refunded]
+      responses:
+        '200':
+          description: Subscription updated.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [subscription]
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/Subscription'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Subscriptions]
+      summary: Disable a subscription
+      description: |
+        Soft-deletes the subscription by setting its status to `DISABLED`.
+        Delivery history is retained, and queued work is skipped when processed.
+      operationId: deleteSubscription
+      responses:
+        '204':
+          description: Subscription disabled. The response has no body.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /events:
+    post:
+      tags: [Events]
+      summary: Ingest an event
+      description: |
+        Stores an immutable event and creates one pending delivery for each active
+        subscription that includes the event type. Delivery is asynchronous, so
+        acceptance does not mean a receiver has processed the event.
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+            example:
+              type: order.paid
+              payload:
+                orderId: ord_123
+                amount: 4200
+                currency: INR
+              source: checkout
+      responses:
+        '202':
+          description: Event stored and accepted for asynchronous fan-out.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+            RateLimit:
+              description: Current ingestion rate-limit state.
+              schema:
+                type: string
+            RateLimit-Policy:
+              description: Applied ingestion rate-limit policy.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateEventResponse'
+              example:
+                event:
+                  id: 72a1e962-8cd4-4d89-ae4b-50a0e34b85d0
+                  type: order.paid
+                  payload:
+                    orderId: ord_123
+                    amount: 4200
+                    currency: INR
+                  source: checkout
+                  createdAt: '2026-09-14T10:15:00.000Z'
+                deliveryCount: 2
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /events/{id}/deliveries:
+    get:
+      tags: [Events]
+      summary: List an event's delivery attempts
+      description: |
+        Returns delivery attempts for an owned event, ordered by creation time and
+        attempt number. A retried event/subscription pair can produce multiple rows.
+      operationId: listEventDeliveries
+      parameters:
+        - $ref: '#/components/parameters/EventId'
+      responses:
+        '200':
+          description: Delivery-attempt history.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deliveries]
+                properties:
+                  deliveries:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeliveryAttempt'
+              example:
+                deliveries:
+                  - id: 5e1baae5-5e62-49d9-866e-263eaaa85f29
+                    subscriptionId: 3b758e7f-52d7-4666-91d8-81672878c02f
+                    status: DELIVERED
+                    httpStatus: 204
+                    attemptNumber: 1
+                    nextRetryAt: null
+                    createdAt: '2026-09-14T10:15:00.000Z'
+                    updatedAt: '2026-09-14T10:15:01.000Z'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /deliveries/failed:
+    get:
+      tags: [Deliveries]
+      summary: List permanently failed deliveries
+      description: |
+        Returns the authenticated client's dead-lettered deliveries, newest first.
+        Use `nextOffset` to determine whether another page is available.
+      operationId: listFailedDeliveries
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of deliveries to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: offset
+          in: query
+          required: false
+          description: Number of deliveries to skip.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100000
+            default: 0
+      responses:
+        '200':
+          description: Permanently failed deliveries and pagination state.
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FailedDeliveriesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /health:
+    get:
+      tags: [Operations]
+      summary: Check service dependencies
+      description: Checks PostgreSQL and Redis with a bounded timeout.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: All dependencies are reachable.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: ok
+                checks:
+                  database:
+                    status: up
+                    responseTimeMs: 2
+                  redis:
+                    status: up
+                    responseTimeMs: 1
+        '503':
+          description: At least one dependency is unavailable or timed out.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: unavailable
+                checks:
+                  database:
+                    status: down
+                    responseTimeMs: 2001
+                  redis:
+                    status: up
+                    responseTimeMs: 1
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /metrics:
+    get:
+      tags: [Operations]
+      summary: Get Prometheus metrics
+      description: |
+        Returns process metrics, delivery outcomes and retries, delivery success
+        ratio, queue depth by state, and metric-collection failures.
+      operationId: getMetrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus text exposition.
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
+            X-Request-Id:
+              $ref: '#/components/headers/RequestId'
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP pigeon_delivery_retries_total Webhook delivery retries scheduled since the process started.
+                # TYPE pigeon_delivery_retries_total counter
+                pigeon_delivery_retries_total{service="pigeon"} 0
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: One-time client credential produced by `npm run client:create`.
+
+  headers:
+    RequestId:
+      description: Correlation ID supplied by the caller or generated by Pigeon.
+      schema:
+        type: string
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
+      example: 8f0bd8e7-123e-4a64-806d-71350a41a2ee
+
+  parameters:
+    SubscriptionId:
+      name: id
+      in: path
+      required: true
+      description: Subscription UUID.
+      schema:
+        type: string
+        format: uuid
+
+    EventId:
+      name: id
+      in: path
+      required: true
+      description: Event UUID.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: |
+        The request failed validation, contains malformed JSON, or includes an
+        invalid webhook target URL.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validation:
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: The request is invalid.
+                  details:
+                    formErrors: []
+                    fieldErrors:
+                      eventTypes:
+                        - Array must contain at least 1 element(s)
+            malformedJson:
+              value:
+                error:
+                  code: INVALID_JSON
+                  message: The request body contains invalid JSON.
+            invalidTarget:
+              value:
+                error:
+                  code: INVALID_TARGET_URL
+                  message: Target URL must use HTTPS.
+
+    Unauthorized:
+      description: The API key is absent or invalid.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            missing:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: An X-API-Key header is required.
+            invalid:
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: The API key is invalid.
+
+    NotFound:
+      description: The requested owned resource does not exist.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Resource not found.
+
+    RateLimitExceeded:
+      description: The authenticated client exceeded the event-ingestion limit.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+        Retry-After:
+          description: Seconds until the client should retry.
+          schema:
+            type: integer
+            minimum: 0
+        RateLimit:
+          description: Current ingestion rate-limit state.
+          schema:
+            type: string
+        RateLimit-Policy:
+          description: Applied ingestion rate-limit policy.
+          schema:
+            type: string
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: RATE_LIMIT_EXCEEDED
+              message: Too many event ingestion requests. Try again later.
+
+    InternalError:
+      description: An unexpected server error occurred.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/RequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected error occurred.
+
+  schemas:
+    SubscriptionStatus:
+      type: string
+      enum: [ACTIVE, DISABLED]
+
+    DeliveryStatus:
+      type: string
+      enum:
+        - PENDING
+        - IN_PROGRESS
+        - RETRY_SCHEDULED
+        - DELIVERED
+        - FAILED_PERMANENT
+
+    EventType:
+      type: string
+      minLength: 1
+      maxLength: 255
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'
+      examples: [order.paid]
+
+    EventTypes:
+      type: array
+      minItems: 1
+      maxItems: 100
+      description: Duplicate values are removed before the subscription is stored.
+      items:
+        $ref: '#/components/schemas/EventType'
+
+    Subscription:
+      type: object
+      required:
+        - id
+        - targetUrl
+        - eventTypes
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        targetUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Publicly routable HTTPS webhook URL.
+        eventTypes:
+          $ref: '#/components/schemas/EventTypes'
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      required: [targetUrl, eventTypes]
+      properties:
+        targetUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Publicly routable HTTPS webhook URL.
+        eventTypes:
+          $ref: '#/components/schemas/EventTypes'
+
+    CreateSubscriptionResponse:
+      type: object
+      required: [subscription, secret]
+      properties:
+        subscription:
+          $ref: '#/components/schemas/Subscription'
+        secret:
+          type: string
+          description: One-time HMAC signing secret. Store it securely.
+
+    UpdateSubscriptionRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        targetUrl:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: Publicly routable HTTPS webhook URL.
+        eventTypes:
+          $ref: '#/components/schemas/EventTypes'
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+
+    Event:
+      type: object
+      required: [id, type, payload, source, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/EventType'
+        payload:
+          type: object
+          additionalProperties: true
+        source:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 255
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateEventRequest:
+      type: object
+      additionalProperties: false
+      required: [type, payload]
+      properties:
+        type:
+          $ref: '#/components/schemas/EventType'
+        payload:
+          type: object
+          additionalProperties: true
+        source:
+          type: string
+          minLength: 1
+          maxLength: 255
+
+    CreateEventResponse:
+      type: object
+      required: [event, deliveryCount]
+      properties:
+        event:
+          $ref: '#/components/schemas/Event'
+        deliveryCount:
+          type: integer
+          minimum: 0
+          description: Number of matching active subscriptions at ingestion time.
+
+    DeliveryAttempt:
+      type: object
+      required:
+        - id
+        - subscriptionId
+        - status
+        - httpStatus
+        - attemptNumber
+        - nextRetryAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Also sent to the receiver as `X-Delivery-Id`.
+        subscriptionId:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/DeliveryStatus'
+        httpStatus:
+          type: [integer, 'null']
+          minimum: 100
+          maximum: 599
+        attemptNumber:
+          type: integer
+          minimum: 1
+        nextRetryAt:
+          type: [string, 'null']
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    FailedDelivery:
+      allOf:
+        - $ref: '#/components/schemas/DeliveryAttempt'
+        - type: object
+          required:
+            - attemptsMade
+            - failedReason
+            - failedAt
+            - deadLetterPublishedAt
+            - event
+            - subscription
+          properties:
+            attemptsMade:
+              type: integer
+              minimum: 1
+            failedReason:
+              type: string
+            failedAt:
+              type: string
+              format: date-time
+            deadLetterPublishedAt:
+              type: [string, 'null']
+              format: date-time
+              description: Null while durable dead-letter publication is still pending.
+            event:
+              $ref: '#/components/schemas/EventSummary'
+            subscription:
+              $ref: '#/components/schemas/SubscriptionSummary'
+
+    EventSummary:
+      type: object
+      required: [id, type, source, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/EventType'
+        source:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 255
+        createdAt:
+          type: string
+          format: date-time
+
+    SubscriptionSummary:
+      type: object
+      required: [id, targetUrl, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        targetUrl:
+          type: string
+          format: uri
+        status:
+          $ref: '#/components/schemas/SubscriptionStatus'
+
+    FailedDeliveriesResponse:
+      type: object
+      required: [deliveries, pagination]
+      properties:
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/FailedDelivery'
+        pagination:
+          $ref: '#/components/schemas/OffsetPagination'
+
+    OffsetPagination:
+      type: object
+      required: [limit, offset, nextOffset]
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        offset:
+          type: integer
+          minimum: 0
+        nextOffset:
+          type: [integer, 'null']
+          minimum: 0
+
+    DependencyCheck:
+      type: object
+      required: [status, responseTimeMs]
+      properties:
+        status:
+          type: string
+          enum: [up, down]
+        responseTimeMs:
+          type: integer
+          minimum: 0
+
+    HealthResponse:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        checks:
+          type: object
+          required: [database, redis]
+          properties:
+            database:
+              $ref: '#/components/schemas/DependencyCheck'
+            redis:
+              $ref: '#/components/schemas/DependencyCheck'
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              description: Validation or application-specific error details.
