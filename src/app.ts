@@ -4,6 +4,7 @@ import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { bindRequestLogger, httpLogger } from './middleware/request-logging';
 import { eventsRouter } from './routes/events';
 import { healthRouter } from './routes/health';
+import { metricsRouter } from './routes/metrics';
 import { subscriptionsRouter } from './routes/subscriptions';
 
 export const createApp = () => {
@@ -14,6 +15,7 @@ export const createApp = () => {
   app.use(bindRequestLogger);
   app.use(express.json({ limit: '1mb' }));
   app.use('/health', healthRouter);
+  app.use('/metrics', metricsRouter);
   app.use('/subscriptions', subscriptionsRouter);
   app.use('/events', eventsRouter);
   app.use(notFoundHandler);

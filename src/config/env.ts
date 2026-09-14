@@ -9,6 +9,7 @@ const environmentSchema = z.object({
   HOST: z.string().trim().min(1).default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
+  METRICS_COLLECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
   DATABASE_URL: z
     .string()
     .url()

@@ -20,10 +20,11 @@
     "format:check": "prettier --check ."
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
+    "@prometheus-io/client": "^0.16.1",
     "bullmq": "^6.3.3",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",

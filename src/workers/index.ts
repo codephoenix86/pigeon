@@ -8,6 +8,11 @@ import { DELIVERY_JOB_NAME, DELIVERY_QUEUE_NAME, DeliveryJobData } from '../queu
 import { calculateDeliveryBackoff } from '../services/delivery-backoff';
 import { publishDeadLetterOutboxEntries } from '../services/delivery-dead-letter-outbox-service';
 import {
+  recordDeliveryPermanentFailure,
+  recordDeliveryRetry,
+  recordDeliverySuccess,
+} from '../services/metrics-service';
+import {
   SubscriptionConcurrencyLease,
   tryAcquireSubscriptionLease,
 } from '../services/subscription-concurrency-service';
@@ -146,6 +151,8 @@ const deadLetterDelivery = async (
     return;
   }
 
+  recordDeliveryPermanentFailure();
+
   try {
     await publishDeadLetterOutboxEntries([deliveryAttemptId]);
   } catch (publishError) {
@@ -207,6 +214,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
         nextRetryAt: null,
       },
     });
+    recordDeliverySuccess();
     jobLogger.info(
       {
         attemptId: currentAttemptId,
@@ -248,6 +256,7 @@ const processDeliveryJob = async (job: Job<DeliveryJobData>) => {
           nextRetryAt,
         },
       });
+      recordDeliveryRetry();
       jobLogger.warn(
         {
           err: error,
