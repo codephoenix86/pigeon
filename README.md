@@ -178,4 +178,8 @@ tests/               Unit, integration, and worker tests
 docs/                Supporting documentation
 ```
 
-Webhook receiver implementers should also read [Verifying webhook signatures](docs/webhook-signatures.md).
+## Documentation
+
+- [OpenAPI API reference](docs/openapi.yaml)
+- [Webhook signature verification](docs/webhook-signatures.md)
+- [End-to-end demo and recording guide](docs/demo.md)
