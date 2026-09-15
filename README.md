@@ -79,14 +79,38 @@ If sustained throughput, long-term replay, strict partition ordering, or many in
 
 ## Prerequisites
 
-- Node.js 22 or newer
-- npm
-- A running PostgreSQL instance
-- A running Redis instance
+- Docker Engine or Docker Desktop with Docker Compose (recommended)
+- Or, for manual development: Node.js 22 or newer, npm, PostgreSQL, and Redis
 
-Container-based local infrastructure will be added in a later phase. For now, run PostgreSQL and Redis using your preferred local installation or containers and make their connection URLs available to Pigeon.
+## Run with Docker
 
-## Local setup
+Build the application and start Pigeon, PostgreSQL, and Redis with one command:
+
+```bash
+docker compose up --build
+```
+
+Compose waits for PostgreSQL to become healthy, applies all committed Prisma migrations, waits for Redis, and then starts the application. PostgreSQL and Redis data are kept in named volumes across restarts.
+
+Confirm that the stack is healthy:
+
+```bash
+curl -i http://localhost:3000/health
+```
+
+Provision a client and its one-time API key from the running application container:
+
+```bash
+docker compose exec app node dist/scripts/create-client.js
+```
+
+Stop the stack with `Ctrl+C`, or use `docker compose down` when it is running in the background. To also delete all local PostgreSQL and Redis data, run `docker compose down --volumes`.
+
+By default, the app, PostgreSQL, and Redis bind only to the host loopback interface on ports `3000`, `5432`, and `6379`. Change `PORT`, `POSTGRES_HOST_PORT`, or `REDIS_HOST_PORT` in `.env` if a port is already occupied.
+
+## Manual local setup
+
+### Setup
 
 1. Install dependencies:
 
@@ -116,7 +140,7 @@ Container-based local infrastructure will be added in a later phase. For now, ru
 
    Save the displayed API key immediately. Pigeon stores only its SHA-256 hash and will not show the raw key again. Authenticated requests send it in the `X-API-Key` header.
 
-## Run locally
+### Run the application
 
 Start Pigeon in development mode:
 
