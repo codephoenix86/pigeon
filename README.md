@@ -165,6 +165,12 @@ npm start
 
 Stop the process with `Ctrl+C`; Pigeon handles `SIGINT` and `SIGTERM` by closing the HTTP server, worker, queues, publishers, and database connection.
 
+## Deployment
+
+Pigeon includes a Render Blueprint that deploys the production Docker image as a public web service with private, persistent PostgreSQL and Redis-compatible Key Value dependencies. Deployments wait for CI, apply Prisma migrations before startup, and use `/health` as the rollout health check.
+
+See the [Render deployment guide](docs/deployment.md) for cost, region, provisioning, verification, and operational guidance. Creating the Blueprint provisions paid resources, so review the selected plans before applying it.
+
 ## Configuration
 
 All configuration is loaded from environment variables and validated at startup. Invalid values fail fast with a configuration error. See [`.env.example`](.env.example) for the complete set of settings and defaults, including worker concurrency, delivery timeout, retry attempts, outbox polling, and ingestion rate limits.
@@ -200,6 +206,7 @@ src/services/        Domain, outbox, security, health, and metrics logic
 src/workers/         Webhook delivery worker
 tests/               Unit, integration, and worker tests
 docs/                Supporting documentation
+render.yaml          Render Blueprint for the hosted production stack
 ```
 
 ## Documentation
@@ -207,3 +214,4 @@ docs/                Supporting documentation
 - [OpenAPI API reference](docs/openapi.yaml)
 - [Webhook signature verification](docs/webhook-signatures.md)
 - [End-to-end demo and recording guide](docs/demo.md)
+- [Render deployment guide](docs/deployment.md)
