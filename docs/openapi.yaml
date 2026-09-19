@@ -223,8 +223,8 @@ paths:
       tags: [Events]
       summary: Ingest an event
       description: |
-        Stores an immutable event and creates one pending delivery for each active
-        subscription that includes the event type. Delivery is asynchronous, so
+        Stores an immutable event with a pending fan-out status. A separate worker
+        creates deliveries for matching active subscriptions asynchronously, so
         acceptance does not mean a receiver has processed the event.
       operationId: createEvent
       requestBody:
@@ -267,8 +267,8 @@ paths:
                     amount: 4200
                     currency: INR
                   source: checkout
+                  fanoutStatus: PENDING
                   createdAt: '2026-09-14T10:15:00.000Z'
-                deliveryCount: 2
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -696,7 +696,7 @@ components:
 
     Event:
       type: object
-      required: [id, type, payload, source, createdAt]
+      required: [id, type, payload, source, fanoutStatus, createdAt]
       properties:
         id:
           type: string
@@ -710,6 +710,10 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 255
+        fanoutStatus:
+          type: string
+          enum: [PENDING, PROCESSING, COMPLETED]
+          description: Progress of creating delivery attempts for this event.
         createdAt:
           type: string
           format: date-time
@@ -731,14 +735,10 @@ components:
 
     CreateEventResponse:
       type: object
-      required: [event, deliveryCount]
+      required: [event]
       properties:
         event:
           $ref: '#/components/schemas/Event'
-        deliveryCount:
-          type: integer
-          minimum: 0
-          description: Number of matching active subscriptions at ingestion time.
 
     DeliveryAttempt:
       type: object

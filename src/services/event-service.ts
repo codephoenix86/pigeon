@@ -1,9 +1,7 @@
-import { DeliveryStatus, Prisma, SubscriptionStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 
-import { getLogger } from '../config/logger';
 import { prisma } from '../db';
 import { AppError } from '../errors/app-error';
-import { publishDeliveryOutboxEntries } from './delivery-outbox-service';
 
 export type CreateEventInput = {
   type: string;
@@ -16,60 +14,17 @@ const eventFields = {
   type: true,
   payload: true,
   source: true,
+  fanoutStatus: true,
   createdAt: true,
 } as const;
 
 export const createEvent = async (clientId: string, input: CreateEventInput) => {
-  const { event, deliveryAttemptIds } = await prisma.$transaction(async (transaction) => {
-    const event = await transaction.event.create({
-      data: { ...input, clientId },
-      select: eventFields,
-    });
-    const subscriptions = await transaction.subscription.findMany({
-      where: {
-        clientId,
-        status: SubscriptionStatus.ACTIVE,
-        eventTypes: { has: input.type },
-      },
-      select: { id: true },
-    });
-
-    const deliveryAttempts = await transaction.deliveryAttempt.createManyAndReturn({
-      data: subscriptions.map((subscription) => ({
-        eventId: event.id,
-        subscriptionId: subscription.id,
-        status: DeliveryStatus.PENDING,
-        attemptNumber: 1,
-      })),
-      select: { id: true },
-    });
-
-    if (deliveryAttempts.length > 0) {
-      await transaction.deliveryOutbox.createMany({
-        data: deliveryAttempts.map((deliveryAttempt) => ({
-          deliveryAttemptId: deliveryAttempt.id,
-        })),
-      });
-    }
-
-    return {
-      event,
-      deliveryAttemptIds: deliveryAttempts.map((deliveryAttempt) => deliveryAttempt.id),
-    };
+  const event = await prisma.event.create({
+    data: { ...input, clientId },
+    select: eventFields,
   });
 
-  try {
-    await publishDeliveryOutboxEntries(deliveryAttemptIds);
-  } catch (error) {
-    // The enqueue intent is durable. The background publisher will retry it,
-    // so a temporary Redis outage must not turn an accepted event into a 500.
-    getLogger().error(
-      { err: error, eventId: event.id, deliveryCount: deliveryAttemptIds.length },
-      'Immediate delivery outbox publish failed; deferring to retry publisher',
-    );
-  }
-
-  return { event, deliveryCount: deliveryAttemptIds.length };
+  return { event };
 };
 
 export const listEventDeliveries = async (clientId: string, eventId: string) => {

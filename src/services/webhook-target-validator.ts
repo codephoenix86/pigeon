@@ -6,6 +6,8 @@ import { AppError } from '../errors/app-error';
 const blockedIpv4Addresses = new BlockList();
 const blockedIpv6Addresses = new BlockList();
 
+const allowLocalTargets = process.env.ALLOW_LOCAL_WEBHOOK_TARGETS === 'true';
+
 const blockedIpv4Subnets: Array<[string, number]> = [
   ['0.0.0.0', 8],
   ['10.0.0.0', 8],
@@ -79,7 +81,7 @@ export const validateWebhookTargetUrl = async (targetUrl: string): Promise<strin
     throw invalidTargetUrl('Target URL must be a valid HTTPS URL.');
   }
 
-  if (parsedUrl.protocol !== 'https:') {
+  if (!allowLocalTargets && parsedUrl.protocol !== 'https:') {
     throw invalidTargetUrl('Target URL must use HTTPS.');
   }
 
@@ -89,14 +91,14 @@ export const validateWebhookTargetUrl = async (targetUrl: string): Promise<strin
 
   const hostname = normalizedHostname(parsedUrl.hostname);
 
-  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
+  if (!allowLocalTargets && (hostname === 'localhost' || hostname.endsWith('.localhost'))) {
     throw invalidTargetUrl('Target URL must not use a local hostname.');
   }
 
   const literalAddressFamily = isIP(hostname);
 
   if (literalAddressFamily !== 0) {
-    if (!isPublicAddress(hostname)) {
+    if (!allowLocalTargets && !isPublicAddress(hostname)) {
       throw invalidTargetUrl('Target URL must not use a private or reserved IP address.');
     }
 
@@ -113,7 +115,7 @@ export const validateWebhookTargetUrl = async (targetUrl: string): Promise<strin
 
   if (
     resolvedAddresses.length === 0 ||
-    resolvedAddresses.some(({ address }) => !isPublicAddress(address))
+    (!allowLocalTargets && resolvedAddresses.some(({ address }) => !isPublicAddress(address)))
   ) {
     throw invalidTargetUrl('Target URL hostname must resolve only to public IP addresses.');
   }

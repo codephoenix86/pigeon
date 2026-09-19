@@ -1,6 +1,13 @@
 import { createHash, randomBytes } from 'node:crypto';
 
+import { env } from '../config/env';
 import { prisma } from '../db';
+import {
+  cacheAuthenticatedClient,
+  cacheInvalidApiKey,
+  getCachedAuthenticatedClientId,
+  isKnownInvalidApiKey,
+} from './api-key-cache-service';
 
 const API_KEY_PREFIX = 'pgn_';
 
@@ -22,7 +29,33 @@ export const createClient = async () => {
 };
 
 export const findClientByApiKey = (apiKey: string) =>
-  prisma.client.findUnique({
-    where: { apiKeyHash: hashApiKey(apiKey) },
+  findClientByApiKeyHash(hashApiKey(apiKey), isCacheableApiKey(apiKey));
+
+const isCacheableApiKey = (apiKey: string): boolean => /^pgn_[A-Za-z0-9_-]{43}$/.test(apiKey);
+
+const findClientByApiKeyHash = async (apiKeyHash: string, cacheNegativeResult: boolean) => {
+  if (env.API_KEY_CACHE_ENABLED) {
+    const cachedClientId = await getCachedAuthenticatedClientId(apiKeyHash);
+
+    if (cachedClientId) {
+      return { id: cachedClientId };
+    }
+
+    if (await isKnownInvalidApiKey(apiKeyHash)) {
+      return null;
+    }
+  }
+
+  const client = await prisma.client.findUnique({
+    where: { apiKeyHash },
     select: { id: true },
   });
+
+  if (client && env.API_KEY_CACHE_ENABLED) {
+    await cacheAuthenticatedClient(apiKeyHash, client.id);
+  } else if (!client && cacheNegativeResult && env.API_KEY_CACHE_ENABLED) {
+    await cacheInvalidApiKey(apiKeyHash);
+  }
+
+  return client;
+};

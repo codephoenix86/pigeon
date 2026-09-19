@@ -7,7 +7,7 @@ Pigeon provides **at-least-once delivery**. A receiver may see the same logical 
 ## Features
 
 - API-key-authenticated subscription and event APIs
-- Durable event ingestion and queue publication through a PostgreSQL outbox
+- Durable event ingestion, deferred fan-out, and queue publication through PostgreSQL
 - One BullMQ job per matching active subscription
 - HMAC-SHA256 signed webhook requests with timestamp and delivery ID headers
 - Bounded exponential backoff with jitter and a dead-letter queue
@@ -22,7 +22,7 @@ Pigeon provides **at-least-once delivery**. A receiver may see the same logical 
 flowchart LR
     Client[API client] -->|subscriptions and events| API[Express API]
     API -->|transaction: event, delivery attempts, outbox| PG[(PostgreSQL)]
-    PG --> Publisher[Outbox publisher]
+    PG --> Publisher[Outbox worker]
     Publisher -->|delivery jobs| Queue[(Redis / BullMQ)]
     Queue --> Worker[Delivery worker]
     Worker -->|signed HTTPS POST| Receiver[Webhook receiver]
@@ -32,9 +32,9 @@ flowchart LR
     DLQPublisher --> DLQ[(BullMQ dead-letter queue)]
 ```
 
-The API, publishers, and worker run in the same Node.js process. PostgreSQL stores clients, subscriptions, immutable events, every delivery attempt, and durable queue-publication intent. Redis backs the delivery and dead-letter queues.
+The API, fan-out worker, delivery publisher, and delivery worker run as independent Node.js processes. The fan-out worker creates delivery attempts from pending events; the publisher sends unpublished attempts to BullMQ; the delivery worker runs the dead-letter publisher. PostgreSQL stores clients, subscriptions, immutable events, and delivery attempts. Redis backs the delivery and dead-letter queues.
 
-When a client submits an event, Pigeon atomically stores the event, creates a pending delivery for every matching active subscription, and records outbox entries. It then returns `202 Accepted` without waiting for receivers. The outbox publisher creates BullMQ jobs, and the worker re-checks subscription status before each signed request. Successful requests are resolved on any `2xx` response; failures are retried and eventually recorded as permanent failures and published to the dead-letter queue.
+When a client submits an event, Pigeon stores it with `fanout_status = PENDING` and returns `202 Accepted` immediately. The fan-out worker later creates pending deliveries for matching active subscriptions in batches. The delivery publisher creates BullMQ jobs from attempts whose `published_at` is null, and the worker re-checks subscription status before each signed request. Successful requests are resolved on any `2xx` response; failures are retried and eventually recorded as permanent failures and published to the dead-letter queue.
 
 ## Design decisions
 
@@ -58,7 +58,7 @@ The first step would be to measure queue lag, delivery latency, fan-out size, Po
 
 | Area               | Current design                                                 | 10× evolution                                                                                           |
 | ------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Process topology   | API, publishers, and worker share one process                  | Deploy them separately and scale API and worker capacity independently                                  |
+| Process topology   | API, outbox publisher, and delivery worker are separate        | Scale API, publisher, and worker capacity independently                                                 |
 | Event fan-out      | All matching deliveries are created during ingestion           | Persist durable fan-out intent, then create deliveries asynchronously in bounded batches                |
 | PostgreSQL         | One indexed transactional store                                | Add connection pooling, retention/archival, and partition high-volume event and delivery tables         |
 | Outbox             | One polling publisher per outbox                               | Use multiple claim-based publishers with short transactions and `SKIP LOCKED`-style coordination        |
@@ -84,13 +84,13 @@ If sustained throughput, long-term replay, strict partition ordering, or many in
 
 ## Run with Docker
 
-Build the application and start Pigeon, PostgreSQL, and Redis with one command:
+Build the application and start the API, outbox worker, delivery worker, PostgreSQL, and Redis with one command:
 
 ```bash
 docker compose up --build
 ```
 
-Compose waits for PostgreSQL to become healthy, applies all committed Prisma migrations, waits for Redis, and then starts the application. PostgreSQL and Redis data are kept in named volumes across restarts.
+Compose waits for PostgreSQL to become healthy, applies all committed Prisma migrations, waits for Redis, and then starts the API, outbox worker, and delivery worker independently. PostgreSQL and Redis data are kept in named volumes across restarts.
 
 Confirm that the stack is healthy:
 
@@ -101,7 +101,7 @@ curl -i http://localhost:3000/health
 Provision a client and its one-time API key from the running application container:
 
 ```bash
-docker compose exec app node dist/scripts/create-client.js
+docker compose exec api node dist/scripts/create-client.js
 ```
 
 Stop the stack with `Ctrl+C`, or use `docker compose down` when it is running in the background. To also delete all local PostgreSQL and Redis data, run `docker compose down --volumes`.
@@ -142,10 +142,13 @@ By default, the app, PostgreSQL, and Redis bind only to the host loopback interf
 
 ### Run the application
 
-Start Pigeon in development mode:
+Start the API, fan-out worker, delivery publisher, and delivery worker in separate terminals during development:
 
 ```bash
 npm run dev
+npm run dev:fanout
+npm run dev:outbox
+npm run dev:worker
 ```
 
 The default listener is `http://localhost:3000`. Confirm that both dependencies are reachable:
@@ -161,9 +164,12 @@ For a production-style local run, compile and start the generated JavaScript:
 ```bash
 npm run build
 npm start
+npm run start:fanout
+npm run start:outbox
+npm run start:worker
 ```
 
-Stop the process with `Ctrl+C`; Pigeon handles `SIGINT` and `SIGTERM` by closing the HTTP server, worker, queues, publishers, and database connection.
+Stop any process with `Ctrl+C`; each handles `SIGINT` and `SIGTERM` gracefully. The API closes its HTTP server and database connection; the outbox worker stops polling and closes its queue and database connections; the delivery worker stops taking jobs, waits for active work to finish, then closes its dead-letter publisher, queues, Redis lease connection, and database connection.
 
 ## Deployment
 
@@ -181,9 +187,15 @@ Do not commit `.env`; it may contain database credentials or other deployment-sp
 
 | Command                  | Purpose                                              |
 | ------------------------ | ---------------------------------------------------- |
-| `npm run dev`            | Run the TypeScript service with automatic restarts   |
+| `npm run dev`            | Run the API in TypeScript with automatic restarts    |
+| `npm run dev:fanout`     | Run the TypeScript event fan-out worker              |
+| `npm run dev:outbox`     | Run the TypeScript delivery-outbox worker            |
+| `npm run dev:worker`     | Run the TypeScript delivery worker with restarts     |
 | `npm run build`          | Compile application TypeScript into `dist/`          |
-| `npm start`              | Run the compiled service                             |
+| `npm start`              | Run the compiled API                                 |
+| `npm run start:fanout`   | Run the compiled event fan-out worker                |
+| `npm run start:outbox`   | Run the compiled delivery-outbox worker              |
+| `npm run start:worker`   | Run the compiled delivery worker                     |
 | `npm run client:create`  | Provision a client and one-time API key              |
 | `npm run prisma:migrate` | Create or apply migrations during schema development |
 | `npm run prisma:deploy`  | Apply committed migrations                           |

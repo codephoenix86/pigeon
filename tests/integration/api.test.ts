@@ -288,7 +288,7 @@ describe('Pigeon API', () => {
 
   describe('event and delivery routes', () => {
     it('accepts an event for asynchronous delivery', async () => {
-      mocks.createEvent.mockResolvedValue({ event, deliveryCount: 2 });
+      mocks.createEvent.mockResolvedValue({ event: { ...event, fanoutStatus: 'PENDING' } });
 
       const response = await request(app)
         .post('/events')
@@ -297,8 +297,7 @@ describe('Pigeon API', () => {
 
       expect(response.status).toBe(202);
       expect(response.body).toEqual({
-        event: { ...event, createdAt: CREATED_AT.toISOString() },
-        deliveryCount: 2,
+        event: { ...event, fanoutStatus: 'PENDING', createdAt: CREATED_AT.toISOString() },
       });
       expect(mocks.createEvent).toHaveBeenCalledWith(CLIENT_ID, {
         type: 'order.paid',

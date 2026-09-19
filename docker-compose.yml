@@ -10,11 +10,14 @@ x-app-environment: &app-environment
   DELIVERY_TIMEOUT_MS: ${DELIVERY_TIMEOUT_MS:-10000}
   DELIVERY_MAX_ATTEMPTS: ${DELIVERY_MAX_ATTEMPTS:-6}
   DELIVERY_BACKOFF_JITTER: ${DELIVERY_BACKOFF_JITTER:-0.2}
+  ALLOW_LOCAL_WEBHOOK_TARGETS: ${ALLOW_LOCAL_WEBHOOK_TARGETS:-false}
   DELIVERY_WORKER_CONCURRENCY: ${DELIVERY_WORKER_CONCURRENCY:-10}
   DELIVERY_SUBSCRIPTION_CONCURRENCY: ${DELIVERY_SUBSCRIPTION_CONCURRENCY:-1}
   DELIVERY_THROTTLE_DELAY_MS: ${DELIVERY_THROTTLE_DELAY_MS:-1000}
   DELIVERY_OUTBOX_POLL_INTERVAL_MS: ${DELIVERY_OUTBOX_POLL_INTERVAL_MS:-1000}
   DELIVERY_OUTBOX_BATCH_SIZE: ${DELIVERY_OUTBOX_BATCH_SIZE:-100}
+  EVENT_FANOUT_POLL_INTERVAL_MS: ${EVENT_FANOUT_POLL_INTERVAL_MS:-1000}
+  EVENT_FANOUT_BATCH_SIZE: ${EVENT_FANOUT_BATCH_SIZE:-100}
   INGESTION_RATE_LIMIT_WINDOW_MS: ${INGESTION_RATE_LIMIT_WINDOW_MS:-60000}
   INGESTION_RATE_LIMIT_MAX_REQUESTS: ${INGESTION_RATE_LIMIT_MAX_REQUESTS:-100}
 
@@ -63,13 +66,15 @@ services:
         condition: service_healthy
     restart: 'no'
 
-  app:
+  api:
     build:
       context: .
       target: runtime
     environment: *app-environment
     ports:
       - '127.0.0.1:${PORT:-3000}:3000'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     depends_on:
       migration:
         condition: service_completed_successfully
@@ -87,6 +92,46 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  outbox:
+    build:
+      context: .
+      target: runtime
+    command: ['node', 'dist/outbox-worker.js']
+    environment: *app-environment
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  fanout:
+    build:
+      context: .
+      target: runtime
+    command: ['node', 'dist/fanout-worker.js']
+    environment: *app-environment
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: runtime
+    command: ['node', 'dist/worker.js']
+    environment: *app-environment
+    depends_on:
+      migration:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     stop_grace_period: 30s
     restart: unless-stopped
 

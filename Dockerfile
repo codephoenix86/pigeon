@@ -53,4 +53,4 @@ USER node
 EXPOSE 3000
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/api.js"]

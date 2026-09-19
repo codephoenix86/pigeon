@@ -4,6 +4,7 @@ import { SubscriptionStatus } from '@prisma/client';
 
 import { prisma } from '../db';
 import { AppError } from '../errors/app-error';
+import { invalidateSubscriptionRouting } from './subscription-routing-cache-service';
 import { validateWebhookTargetUrl } from './webhook-target-validator';
 
 const subscriptionFields = {
@@ -45,6 +46,8 @@ export const createSubscription = async (clientId: string, input: CreateSubscrip
     select: subscriptionFields,
   });
 
+  await invalidateSubscriptionRouting(clientId, subscription.eventTypes);
+
   return { subscription, secret };
 };
 
@@ -63,16 +66,22 @@ export const updateSubscription = async (
   id: string,
   input: UpdateSubscriptionInput,
 ) => {
-  await findOwnedSubscriptionOrThrow(clientId, id);
+  const existing = await findOwnedSubscriptionOrThrow(clientId, id);
   const data = input.targetUrl
     ? { ...input, targetUrl: await validateWebhookTargetUrl(input.targetUrl) }
     : input;
 
-  return prisma.subscription.update({
+  const subscription = await prisma.subscription.update({
     where: { id },
     data,
     select: subscriptionFields,
   });
+
+  if ('eventTypes' in input || 'status' in input) {
+    await invalidateSubscriptionRouting(clientId, [...existing.eventTypes, ...subscription.eventTypes]);
+  }
+
+  return subscription;
 };
 
 /**
@@ -80,9 +89,10 @@ export const updateSubscription = async (
  * delivery, matching the dispatcher lifecycle semantics.
  */
 export const deleteSubscription = async (clientId: string, id: string) => {
-  await findOwnedSubscriptionOrThrow(clientId, id);
+  const subscription = await findOwnedSubscriptionOrThrow(clientId, id);
   await prisma.subscription.update({
     where: { id },
     data: { status: SubscriptionStatus.DISABLED },
   });
+  await invalidateSubscriptionRouting(clientId, subscription.eventTypes);
 };

@@ -101,7 +101,7 @@ const createEvent = async (type, runId) => {
     }),
   });
 
-  console.log(`  accepted event=${result.event.id} matchingDeliveries=${result.deliveryCount}`);
+  console.log(`  accepted event=${result.event.id} fanoutStatus=${result.event.fanoutStatus}`);
   return result.event.id;
 };
 

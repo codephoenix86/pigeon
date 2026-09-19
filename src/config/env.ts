@@ -15,6 +15,22 @@ const environmentSchema = z.object({
     .url()
     .default('postgresql://postgres@localhost:5432/pigeon?schema=public'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
+  API_KEY_CACHE_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default('true'),
+  API_KEY_CACHE_TTL_MS: z.coerce.number().int().min(1_000).max(86_400_000).default(600_000),
+  API_KEY_NEGATIVE_CACHE_TTL_MS: z.coerce.number().int().min(1_000).max(300_000).default(60_000),
+  SUBSCRIPTION_ROUTING_CACHE_ENABLED: z
+    .enum(['true', 'false'])
+    .transform((value) => value === 'true')
+    .default('true'),
+  SUBSCRIPTION_ROUTING_CACHE_TTL_MS: z
+    .coerce.number()
+    .int()
+    .min(1_000)
+    .max(86_400_000)
+    .default(300_000),
   DELIVERY_TIMEOUT_MS: z.coerce.number().int().positive().max(60_000).default(10_000),
   DELIVERY_MAX_ATTEMPTS: z.coerce.number().int().min(5).max(7).default(6),
   DELIVERY_BACKOFF_JITTER: z.coerce.number().min(0).max(0.5).default(0.2),
@@ -23,6 +39,8 @@ const environmentSchema = z.object({
   DELIVERY_THROTTLE_DELAY_MS: z.coerce.number().int().positive().max(60_000).default(1_000),
   DELIVERY_OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
   DELIVERY_OUTBOX_BATCH_SIZE: z.coerce.number().int().min(1).max(1_000).default(100),
+  EVENT_FANOUT_POLL_INTERVAL_MS: z.coerce.number().int().min(100).max(60_000).default(1_000),
+  EVENT_FANOUT_BATCH_SIZE: z.coerce.number().int().min(1).max(1_000).default(100),
   INGESTION_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).max(3_600_000).default(60_000),
   INGESTION_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(100_000).default(100),
 });

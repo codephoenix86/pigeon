@@ -1,3 +1,5 @@
+import { DeliveryStatus } from '@prisma/client';
+
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { prisma } from '../db';
@@ -6,12 +8,13 @@ import { enqueueDeliveries } from '../queue';
 const outboxLogger = logger.child({ component: 'delivery-outbox-publisher' });
 
 const publishOutboxBatch = async (deliveryAttemptIds?: string[]): Promise<number> => {
-  const entries = await prisma.deliveryOutbox.findMany({
+  const entries = await prisma.deliveryAttempt.findMany({
     where: {
+      status: DeliveryStatus.PENDING,
       publishedAt: null,
-      ...(deliveryAttemptIds ? { deliveryAttemptId: { in: deliveryAttemptIds } } : {}),
+      ...(deliveryAttemptIds ? { id: { in: deliveryAttemptIds } } : {}),
     },
-    select: { deliveryAttemptId: true },
+    select: { id: true },
     orderBy: { createdAt: 'asc' },
     take: env.DELIVERY_OUTBOX_BATCH_SIZE,
   });
@@ -20,16 +23,16 @@ const publishOutboxBatch = async (deliveryAttemptIds?: string[]): Promise<number
     return 0;
   }
 
-  const unpublishedDeliveryAttemptIds = entries.map((entry) => entry.deliveryAttemptId);
+  const unpublishedDeliveryAttemptIds = entries.map((entry) => entry.id);
 
   // Queue job IDs are delivery-attempt IDs. If a publisher crashes after Redis
   // accepts these jobs but before PostgreSQL is updated, the next pass safely
   // republishes the same IDs rather than creating duplicate jobs.
   await enqueueDeliveries(unpublishedDeliveryAttemptIds);
 
-  const published = await prisma.deliveryOutbox.updateMany({
+  const published = await prisma.deliveryAttempt.updateMany({
     where: {
-      deliveryAttemptId: { in: unpublishedDeliveryAttemptIds },
+      id: { in: unpublishedDeliveryAttemptIds },
       publishedAt: null,
     },
     data: { publishedAt: new Date() },
