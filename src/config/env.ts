@@ -10,11 +10,8 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65_535).default(3000),
   HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
   METRICS_COLLECTION_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(2_000),
-  DATABASE_URL: z
-    .string()
-    .url()
-    .default('postgresql://postgres@localhost:5432/pigeon?schema=public'),
-  REDIS_URL: z.string().url().default('redis://localhost:6379'),
+  DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
   API_KEY_CACHE_ENABLED: z
     .enum(['true', 'false'])
     .transform((value) => value === 'true')
@@ -25,8 +22,8 @@ const environmentSchema = z.object({
     .enum(['true', 'false'])
     .transform((value) => value === 'true')
     .default('true'),
-  SUBSCRIPTION_ROUTING_CACHE_TTL_MS: z
-    .coerce.number()
+  SUBSCRIPTION_ROUTING_CACHE_TTL_MS: z.coerce
+    .number()
     .int()
     .min(1_000)
     .max(86_400_000)

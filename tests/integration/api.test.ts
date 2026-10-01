@@ -20,11 +20,11 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../src/services/client-service', () => ({
+vi.mock('../../src/api/modules/client/client.service', () => ({
   findClientByApiKey: mocks.findClientByApiKey,
 }));
 
-vi.mock('../../src/services/subscription-service', () => ({
+vi.mock('../../src/api/modules/subscription/subscription.service', () => ({
   createSubscription: mocks.createSubscription,
   listSubscriptions: mocks.listSubscriptions,
   getSubscription: mocks.getSubscription,
@@ -32,28 +32,37 @@ vi.mock('../../src/services/subscription-service', () => ({
   deleteSubscription: mocks.deleteSubscription,
 }));
 
-vi.mock('../../src/services/event-service', () => ({
+vi.mock('../../src/api/modules/event/event.service', () => ({
   createEvent: mocks.createEvent,
   listEventDeliveries: mocks.listEventDeliveries,
 }));
 
-vi.mock('../../src/services/failed-delivery-service', () => ({
-  listFailedDeliveries: mocks.listFailedDeliveries,
+vi.mock('../../src/api/modules/delivery/delivery.controller', () => ({
+  listFailedDeliveriesController: async (
+    request: { clientId?: string; query: { limit?: string; offset?: string } },
+    response: { status: (status: number) => { json: (body: unknown) => void } },
+  ) => {
+    const result = await mocks.listFailedDeliveries(request.clientId, {
+      limit: Number(request.query.limit ?? 50),
+      offset: Number(request.query.offset ?? 0),
+    });
+    response.status(200).json(result);
+  },
 }));
 
-vi.mock('../../src/services/health-service', () => ({
+vi.mock('../../src/api/infra/health/health.service', () => ({
   getHealth: mocks.getHealth,
 }));
 
-vi.mock('../../src/services/metrics-service', () => ({
+vi.mock('../../src/api/infra/metrics/metrics.service', () => ({
   metricsRegistry: {
     contentType: 'text/plain; version=0.0.4; charset=utf-8',
     metrics: mocks.renderMetrics,
   },
 }));
 
-import { createApp } from '../../src/app';
-import { AppError } from '../../src/errors/app-error';
+import { createApp } from '../../src/api/app';
+import { AppError } from '../../src/api/common/errors/app.error';
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 const SUBSCRIPTION_ID = '22222222-2222-4222-8222-222222222222';
@@ -157,7 +166,7 @@ describe('Pigeon API', () => {
 
     it('maps application errors returned by services', async () => {
       mocks.getSubscription.mockRejectedValue(
-        new AppError(404, 'NOT_FOUND', 'Subscription not found.'),
+        new AppError('Subscription not found.', 404, { code: 'NOT_FOUND' }),
       );
 
       const response = await request(app)

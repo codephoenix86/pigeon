@@ -146,9 +146,7 @@ Start the API, fan-out worker, delivery publisher, and delivery worker in separa
 
 ```bash
 npm run dev
-npm run dev:fanout
-npm run dev:outbox
-npm run dev:worker
+npm run dev:workers
 ```
 
 The default listener is `http://localhost:3000`. Confirm that both dependencies are reachable:
@@ -164,9 +162,7 @@ For a production-style local run, compile and start the generated JavaScript:
 ```bash
 npm run build
 npm start
-npm run start:fanout
-npm run start:outbox
-npm run start:worker
+npm run start:workers
 ```
 
 Stop any process with `Ctrl+C`; each handles `SIGINT` and `SIGTERM` gracefully. The API closes its HTTP server and database connection; the outbox worker stops polling and closes its queue and database connections; the delivery worker stops taking jobs, waits for active work to finish, then closes its dead-letter publisher, queues, Redis lease connection, and database connection.
@@ -188,14 +184,11 @@ Do not commit `.env`; it may contain database credentials or other deployment-sp
 | Command                  | Purpose                                              |
 | ------------------------ | ---------------------------------------------------- |
 | `npm run dev`            | Run the API in TypeScript with automatic restarts    |
-| `npm run dev:fanout`     | Run the TypeScript event fan-out worker              |
-| `npm run dev:outbox`     | Run the TypeScript delivery-outbox worker            |
-| `npm run dev:worker`     | Run the TypeScript delivery worker with restarts     |
+| `npm run dev:workers`    | Run delivery, outbox, and event fan-out workers      |
 | `npm run build`          | Compile application TypeScript into `dist/`          |
 | `npm start`              | Run the compiled API                                 |
-| `npm run start:fanout`   | Run the compiled event fan-out worker                |
-| `npm run start:outbox`   | Run the compiled delivery-outbox worker              |
-| `npm run start:worker`   | Run the compiled delivery worker                     |
+| `npm run start:workers`  | Run the compiled worker process                      |
+| `npm run check`          | Run type-checking, linting, and formatting checks    |
 | `npm run client:create`  | Provision a client and one-time API key              |
 | `npm run prisma:migrate` | Create or apply migrations during schema development |
 | `npm run prisma:deploy`  | Apply committed migrations                           |

@@ -5,11 +5,11 @@ const mocks = vi.hoisted(() => ({
   findFirst: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
-  invalidateSubscriptionRouting: vi.fn(),
   validateWebhookTargetUrl: vi.fn(),
+  invalidateSubscriptionRouting: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
+vi.mock('../../src/config/db', () => ({
   prisma: {
     subscription: {
       findFirst: mocks.findFirst,
@@ -19,19 +19,19 @@ vi.mock('../../src/db', () => ({
   },
 }));
 
-vi.mock('../../src/services/subscription-routing-cache-service', () => ({
-  invalidateSubscriptionRouting: mocks.invalidateSubscriptionRouting,
+vi.mock('../../src/api/modules/subscription/subscription.utils', () => ({
+  validateWebhookTargetUrl: mocks.validateWebhookTargetUrl,
 }));
 
-vi.mock('../../src/services/webhook-target-validator', () => ({
-  validateWebhookTargetUrl: mocks.validateWebhookTargetUrl,
+vi.mock('../../src/cache', () => ({
+  invalidateSubscriptionRouting: mocks.invalidateSubscriptionRouting,
 }));
 
 import {
   createSubscription,
   deleteSubscription,
   updateSubscription,
-} from '../../src/services/subscription-service';
+} from '../../src/api/modules/subscription/subscription.service';
 
 const CLIENT_ID = '11111111-1111-4111-8111-111111111111';
 const SUBSCRIPTION = {
@@ -46,8 +46,8 @@ const SUBSCRIPTION = {
 describe('subscription service routing cache invalidation', () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.invalidateSubscriptionRouting.mockResolvedValue(undefined);
     mocks.validateWebhookTargetUrl.mockResolvedValue(SUBSCRIPTION.targetUrl);
+    mocks.invalidateSubscriptionRouting.mockResolvedValue(undefined);
   });
 
   it('invalidates event-type routes after creating a subscription', async () => {

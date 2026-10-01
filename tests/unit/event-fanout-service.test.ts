@@ -24,7 +24,7 @@ vi.mock('../../src/config/env', () => ({
 
 vi.mock('../../src/config/logger', () => ({ logger: mocks.logger }));
 
-vi.mock('../../src/db', () => ({
+vi.mock('../../src/config/db', () => ({
   prisma: {
     $queryRaw: mocks.claimPendingEvents,
     $transaction: mocks.transaction,
@@ -33,7 +33,7 @@ vi.mock('../../src/db', () => ({
   },
 }));
 
-vi.mock('../../src/services/subscription-routing-cache-service', () => ({
+vi.mock('../../src/cache', () => ({
   getCachedSubscriptionIds: mocks.getCachedSubscriptionIds,
   cacheSubscriptionIds: mocks.cacheSubscriptionIds,
 }));
@@ -41,7 +41,7 @@ vi.mock('../../src/services/subscription-routing-cache-service', () => ({
 import {
   fanoutPendingEvents,
   recoverInterruptedEventFanout,
-} from '../../src/services/event-fanout-service';
+} from '../../src/workers/fanout/fanout.processor';
 
 const EVENT = {
   id: '11111111-1111-4111-8111-111111111111',

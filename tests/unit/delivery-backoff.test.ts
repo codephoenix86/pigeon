@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { calculateDeliveryBackoff } from '../../src/services/delivery-backoff';
+import { calculateDeliveryBackoff } from '../../src/api/modules/delivery/delivery.utils';
 
 describe('calculateDeliveryBackoff', () => {
   it.each([

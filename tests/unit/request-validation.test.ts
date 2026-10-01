@@ -2,25 +2,27 @@ import { SubscriptionStatus } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import {
-  createEventSchema,
   createSubscriptionSchema,
-  eventTypeSchema,
-  idParamsSchema,
-  listFailedDeliveriesQuerySchema,
   listSubscriptionsQuerySchema,
   updateSubscriptionSchema,
-} from '../../src/validation/request-schemas';
+} from '../../src/api/modules/subscription/subscription.schema';
+import {
+  createEventSchema,
+  eventIdParamsSchema,
+  eventTypeSchema,
+} from '../../src/api/modules/event/event.schema';
+import { listFailedDeliveriesQuerySchema } from '../../src/api/modules/delivery/delivery.controller';
 
 describe('request validation', () => {
   describe('shared parameters', () => {
     it('accepts UUID identifiers', () => {
       const id = 'f7653f54-6ba6-4f9d-a90f-250c3e2cc80e';
 
-      expect(idParamsSchema.parse({ id })).toEqual({ id });
+      expect(eventIdParamsSchema.parse({ id })).toEqual({ id });
     });
 
     it('rejects malformed identifiers', () => {
-      expect(idParamsSchema.safeParse({ id: 'delivery-123' }).success).toBe(false);
+      expect(eventIdParamsSchema.safeParse({ id: 'delivery-123' }).success).toBe(false);
     });
 
     it('normalizes a valid event type', () => {

@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   cacheInvalidApiKey: vi.fn(),
 }));
 
-vi.mock('../../src/db', () => ({
+vi.mock('../../src/config/db', () => ({
   prisma: {
     client: {
       findUnique: mocks.findUnique,
@@ -16,14 +16,14 @@ vi.mock('../../src/db', () => ({
   },
 }));
 
-vi.mock('../../src/services/api-key-cache-service', () => ({
+vi.mock('../../src/cache', () => ({
   getCachedAuthenticatedClientId: mocks.getCachedAuthenticatedClientId,
   isKnownInvalidApiKey: mocks.isKnownInvalidApiKey,
   cacheAuthenticatedClient: mocks.cacheAuthenticatedClient,
   cacheInvalidApiKey: mocks.cacheInvalidApiKey,
 }));
 
-import { findClientByApiKey, hashApiKey } from '../../src/services/client-service';
+import { findClientByApiKey, hashApiKey } from '../../src/api/modules/client/client.service';
 
 const API_KEY = `pgn_${'a'.repeat(43)}`;
 const API_KEY_HASH = hashApiKey(API_KEY);

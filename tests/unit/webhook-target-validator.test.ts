@@ -4,7 +4,7 @@ const lookupMock = vi.hoisted(() => vi.fn());
 
 vi.mock('node:dns/promises', () => ({ lookup: lookupMock }));
 
-import { validateWebhookTargetUrl } from '../../src/services/webhook-target-validator';
+import { validateWebhookTargetUrl } from '../../src/api/modules/subscription/subscription.utils';
 
 const expectInvalidTarget = async (targetUrl: string) => {
   await expect(validateWebhookTargetUrl(targetUrl)).rejects.toMatchObject({

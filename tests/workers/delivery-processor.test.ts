@@ -4,7 +4,7 @@ import type { Job } from 'bullmq';
 import nock from 'nock';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { DeliveryJobData } from '../../src/queue';
+import type { DeliveryJobData } from '../../src/api/modules/delivery/delivery.constants';
 
 const mocks = vi.hoisted(() => {
   const logger = {
@@ -43,7 +43,7 @@ vi.mock('../../src/config/env', () => ({
 
 vi.mock('../../src/config/logger', () => ({ logger: mocks.logger }));
 
-vi.mock('../../src/db', () => ({
+vi.mock('../../src/config/db', () => ({
   prisma: {
     deliveryAttempt: {
       findUnique: mocks.findDelivery,
@@ -54,25 +54,29 @@ vi.mock('../../src/db', () => ({
   },
 }));
 
-vi.mock('../../src/services/delivery-backoff', () => ({
+vi.mock('../../src/api/modules/delivery/delivery.utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/api/modules/delivery/delivery.utils')>()),
   calculateDeliveryBackoff: mocks.calculateBackoff,
 }));
 
-vi.mock('../../src/services/delivery-dead-letter-outbox-service', () => ({
+vi.mock('../../src/workers/outbox/dead-letter-outbox.publisher', () => ({
   publishDeadLetterOutboxEntries: mocks.publishDeadLetterEntries,
 }));
 
-vi.mock('../../src/services/metrics-service', () => ({
+vi.mock('../../src/api/infra/metrics/metrics.service', () => ({
   recordDeliverySuccess: mocks.recordSuccess,
   recordDeliveryRetry: mocks.recordRetry,
   recordDeliveryPermanentFailure: mocks.recordPermanentFailure,
 }));
 
-vi.mock('../../src/services/subscription-concurrency-service', () => ({
+vi.mock('../../src/api/modules/delivery/delivery.concurrency', () => ({
   tryAcquireSubscriptionLease: mocks.tryAcquireLease,
 }));
 
-import { deliveryBackoffStrategy, processDeliveryJob } from '../../src/workers/delivery-processor';
+import {
+  deliveryBackoffStrategy,
+  processDeliveryJob,
+} from '../../src/workers/delivery/delivery.processor';
 
 const INITIAL_ATTEMPT_ID = '11111111-1111-4111-8111-111111111111';
 const CURRENT_ATTEMPT_ID = '22222222-2222-4222-8222-222222222222';

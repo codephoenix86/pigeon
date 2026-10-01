@@ -4,7 +4,7 @@ import {
   createWebhookTimestamp,
   signWebhookPayload,
   verifyWebhookSignature,
-} from '../../src/services/webhook-signature';
+} from '../../src/api/modules/delivery/delivery.utils';
 
 const payload = '{"orderId":"ord_123","status":"paid"}';
 const secret = 'whsec_test_secret';
